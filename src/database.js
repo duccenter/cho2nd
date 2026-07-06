@@ -21,7 +21,8 @@ const UserSchema = new mongoose.Schema({
     username: String,
     first_name: String,
     trust_score: { type: Number, default: 0 },
-    joined_at: { type: Date, default: Date.now }
+    joined_at: { type: Date, default: Date.now },
+    last_posted_at: { type: Date, default: 0 } // Dùng cho Anti-Flood
 });
 
 const SubscriptionSchema = new mongoose.Schema({

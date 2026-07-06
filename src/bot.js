@@ -34,6 +34,16 @@ bot.action('uy_tin', (ctx) => {
     ctx.answerCbQuery();
 });
 
+// --- XỬ LÝ NÚT TRUNG GIAN GIAO DỊCH ---
+bot.action(/escrow_(.+)/, async (ctx) => {
+    const sellerId = ctx.match[1];
+    const buyer = ctx.from;
+    const adminUsername = 'diticomsvn'; // Username Admin được cấu hình cứng
+
+    await ctx.reply(`🔔 **YÊU CẦU TRUNG GIAN GIAO DỊCH**\n\nNgười mua: [${buyer.first_name}](tg://user?id=${buyer.id})\nNgười bán: [Seller](tg://user?id=${sellerId})\nAdmin hỗ trợ: @${adminUsername}\n\nXin mời Admin @${adminUsername} tạo nhóm riêng với 2 bạn này để tiến hành giao dịch an toàn!`, { parse_mode: 'Markdown' });
+    await ctx.answerCbQuery('Đã gửi yêu cầu gọi Admin!');
+});
+
 // --- 2. TÍNH NĂNG ĐÃ BÁN ---
 bot.command('daban', async (ctx) => {
     const repliedMsg = ctx.message.reply_to_message;
@@ -183,14 +193,49 @@ bot.on('text', async (ctx) => {
 
         if (isMuaBan) {
             const hasTag = text.includes('#ban') || text.includes('#mua');
-            if (!hasTag) {
+            
+            // Regex cho Giá tiền: số đi kèm k, tr, triệu, đ, vnd hoặc có định dạng x.xxx
+            const hasPrice = /\b(\d+[k|tr|triệu|đ|vnd]|\d{1,3}([\.\,]\d{3})+)\b/i.test(text);
+            
+            // Regex cho SĐT: 9-11 số liên tiếp (bắt đầu bằng 0)
+            const hasPhone = /\b(0[3|5|7|8|9])+([0-9]{8})\b/.test(text);
+
+            if (!hasTag || !hasPrice || !hasPhone) {
                 try {
-                    const warning = await ctx.reply(`@${msg.from.username || msg.from.first_name}, bài viết sai định dạng (thiếu hashtag #ban hoặc #mua). Vui lòng sửa lại!`);
+                    await ctx.deleteMessage(msg.message_id).catch(() => {});
+                    const warning = await ctx.reply(`🚫 @${msg.from.username || msg.from.first_name}, bài đăng BỊ XÓA do thiếu thông tin!\n\n**Yêu cầu bắt buộc:**\n1. Mã lệnh #ban hoặc #mua\n2. Giá tiền (VD: 100k, 1.500.000đ)\n3. Số điện thoại (VD: 0987654321)\n\nVui lòng đăng lại cho đúng nhé!`);
                     setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {}), 15000);
                 } catch (err) {}
             } else {
-                // Nếu HỢP LỆ -> Kích hoạt thuật toán SĂN ĐỒ
+                // HỢP LỆ -> Kiểm tra Anti-Flood
                 try {
+                    const user = await User.findOneAndUpdate(
+                        { telegram_id: msg.from.id.toString() },
+                        { 
+                            $set: { 
+                                username: msg.from.username || '',
+                                first_name: msg.from.first_name || ''
+                            }
+                        },
+                        { upsert: true, new: true }
+                    );
+
+                    const now = new Date();
+                    const diffMins = (now - new Date(user.last_posted_at || 0)) / 1000 / 60;
+
+                    // Giới hạn 5 phút mỗi bài
+                    if (diffMins < 5) {
+                        await ctx.deleteMessage(msg.message_id).catch(() => {});
+                        const warning = await ctx.reply(`🚫 @${msg.from.username || msg.from.first_name}, bạn đăng bài quá nhanh! Vui lòng chờ ${Math.ceil(5 - diffMins)} phút nữa để đăng bài tiếp theo.`);
+                        setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {}), 10000);
+                        return; // Dừng xử lý
+                    }
+
+                    // Cập nhật thời gian đăng bài mới nhất
+                    user.last_posted_at = now;
+                    await user.save();
+
+                    // Kích hoạt thuật toán SĂN ĐỒ
                     const subs = await Subscription.find();
                     for (const sub of subs) {
                         if (text.includes(sub.keyword) && sub.telegram_id !== msg.from.id.toString()) {
@@ -202,8 +247,20 @@ bot.on('text', async (ctx) => {
                             ).catch(() => { /* Bỏ qua nếu họ đã block bot */ });
                         }
                     }
+
+                    // THÊM NÚT GỌI TRUNG GIAN
+                    await ctx.reply(`✅ Bài đăng của **${msg.from.first_name}** hợp lệ.\n\n🛡️ *Giao dịch an toàn: Nếu bạn thấy nghi ngờ, hãy gọi Admin đứng ra trung gian giữ tiền giúp bạn.*`, {
+                        reply_to_message_id: msg.message_id,
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '📞 Gọi Admin Trung Gian', callback_data: `escrow_${msg.from.id}` }]
+                            ]
+                        }
+                    });
+
                 } catch (err) {
-                    console.error('Lỗi khi quét Săn đồ:', err);
+                    console.error('Lỗi khi xử lý bài hợp lệ:', err);
                 }
             }
         }
