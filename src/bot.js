@@ -69,6 +69,9 @@ bot.command('gettopicid', (ctx) => {
     }
 });
 
+// Danh sách các từ khóa thô tục (Blacklist)
+const BAD_WORDS = ['đm', 'vcl', 'địt', 'lồn', 'cặc', 'phò', 'đĩ', 'chó đẻ'];
+
 // Xử lý và kiểm duyệt tin nhắn trong nhóm
 bot.on('text', async (ctx) => {
     const msg = ctx.message;
@@ -79,36 +82,58 @@ bot.on('text', async (ctx) => {
 
     // Kiểm duyệt bài viết trong nhóm (bỏ qua tin nhắn riêng cho bot)
     if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
+        
+        // 1. KIỂM TRA TỪ NGỮ THÔ TỤC (Áp dụng cho mọi Topic)
+        const hasBadWord = BAD_WORDS.some(word => new RegExp(`\\b${word}\\b`, 'i').test(text));
+        
+        if (hasBadWord) {
+            try {
+                // Xóa tin nhắn thô tục
+                await ctx.deleteMessage(msg.message_id).catch(() => {});
+                
+                // Khóa chat 1 ngày (86400 giây)
+                const untilDate = Math.floor(Date.now() / 1000) + 86400;
+                await ctx.telegram.restrictChatMember(ctx.chat.id, msg.from.id, {
+                    permissions: { can_send_messages: false },
+                    until_date: untilDate
+                });
+                
+                // Thông báo công khai
+                await ctx.reply(`🚫 Người dùng @${msg.from.username || msg.from.first_name} đã bị khóa chat 1 ngày do sử dụng ngôn từ thô tục.`);
+            } catch (err) {
+                console.error('Không thể xử lý vi phạm thô tục (có thể do thiếu quyền Admin):', err);
+            }
+            return; // Dừng xử lý tiếp
+        }
+
+        // 2. KIỂM TRA ĐỊNH DẠNG MUA BÁN
         const isTopic = msg.is_topic_message;
         const topicId = msg.message_thread_id;
         const muabanTopicId = process.env.MUABAN_TOPIC_ID ? parseInt(process.env.MUABAN_TOPIC_ID) : null;
 
-        // Xác định xem có cần kiểm duyệt tin nhắn này không
-        // Sẽ kiểm duyệt nếu:
-        // 1. Nhóm chưa bật Topic (muabanTopicId = null)
-        // 2. Nhóm đã bật Topic và tin nhắn nằm đúng trong Topic Mua Bán
+        // Xác định xem có cần cảnh báo định dạng tin nhắn này không
         let shouldModerate = false;
         
         if (!muabanTopicId) {
-            shouldModerate = true; // Chưa cài đặt Topic thì kiểm duyệt tất cả
+            shouldModerate = true; // Chưa cài đặt Topic thì áp dụng tất cả
         } else if (isTopic && topicId === muabanTopicId) {
-            shouldModerate = true; // Kiểm duyệt riêng Topic Mua Bán
+            shouldModerate = true; // Chỉ áp dụng ở Topic Mua Bán
         }
 
         if (shouldModerate) {
             const hasTag = text.includes('#ban') || text.includes('#mua');
             
             if (!hasTag) {
-                // Xóa tin nhắn nếu không có tag hợp lệ
+                // Cảnh báo sai định dạng (NHƯNG KHÔNG XÓA BÀI)
                 try {
-                    await ctx.deleteMessage(msg.message_id);
-                    const warning = await ctx.reply(`@${msg.from.username || msg.from.first_name}, bài viết của bạn đã bị xóa vì không chứa hashtag #ban hoặc #mua. Vui lòng đọc /rules.`);
-                    // Tự động xóa cảnh báo sau 10 giây
+                    const warning = await ctx.reply(`@${msg.from.username || msg.from.first_name}, bài viết của bạn có vẻ sai định dạng (thiếu hashtag #ban hoặc #mua). Vui lòng đọc /rules để sửa lại nhé!`);
+                    
+                    // Tự động xóa cảnh báo sau 15 giây để đỡ rác nhóm
                     setTimeout(() => {
                         ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {});
-                    }, 10000);
+                    }, 15000);
                 } catch (err) {
-                    console.error('Không có quyền xóa tin nhắn:', err);
+                    console.error('Không thể gửi cảnh báo:', err);
                 }
             } else {
                 // Lưu bài viết hợp lệ vào database
