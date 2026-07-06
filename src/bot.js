@@ -60,6 +60,15 @@ bot.command('rules', (ctx) => {
     , { parse_mode: 'Markdown' });
 });
 
+// Lệnh /gettopicid để lấy ID của topic hiện tại
+bot.command('gettopicid', (ctx) => {
+    if (ctx.message.is_topic_message && ctx.message.message_thread_id) {
+        ctx.reply(`ID của Topic này là: ${ctx.message.message_thread_id}\n\nBạn hãy copy số này và dán vào biến môi trường MUABAN_TOPIC_ID trên Render nếu đây là topic Mua Bán nhé.`);
+    } else {
+        ctx.reply('Lệnh này chỉ dùng được bên trong một Topic (Chủ đề) của nhóm Diễn đàn (Forum).');
+    }
+});
+
 // Xử lý và kiểm duyệt tin nhắn trong nhóm
 bot.on('text', async (ctx) => {
     const msg = ctx.message;
@@ -70,26 +79,44 @@ bot.on('text', async (ctx) => {
 
     // Kiểm duyệt bài viết trong nhóm (bỏ qua tin nhắn riêng cho bot)
     if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
-        const hasTag = text.includes('#ban') || text.includes('#mua');
+        const isTopic = msg.is_topic_message;
+        const topicId = msg.message_thread_id;
+        const muabanTopicId = process.env.MUABAN_TOPIC_ID ? parseInt(process.env.MUABAN_TOPIC_ID) : null;
+
+        // Xác định xem có cần kiểm duyệt tin nhắn này không
+        // Sẽ kiểm duyệt nếu:
+        // 1. Nhóm chưa bật Topic (muabanTopicId = null)
+        // 2. Nhóm đã bật Topic và tin nhắn nằm đúng trong Topic Mua Bán
+        let shouldModerate = false;
         
-        if (!hasTag) {
-            // Xóa tin nhắn nếu không có tag hợp lệ
-            try {
-                await ctx.deleteMessage(msg.message_id);
-                const warning = await ctx.reply(`@${msg.from.username || msg.from.first_name}, bài viết của bạn đã bị xóa vì không chứa hashtag #ban hoặc #mua. Vui lòng đọc /rules.`);
-                // Tự động xóa cảnh báo sau 10 giây
-                setTimeout(() => {
-                    ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {});
-                }, 10000);
-            } catch (err) {
-                console.error('Không có quyền xóa tin nhắn:', err);
+        if (!muabanTopicId) {
+            shouldModerate = true; // Chưa cài đặt Topic thì kiểm duyệt tất cả
+        } else if (isTopic && topicId === muabanTopicId) {
+            shouldModerate = true; // Kiểm duyệt riêng Topic Mua Bán
+        }
+
+        if (shouldModerate) {
+            const hasTag = text.includes('#ban') || text.includes('#mua');
+            
+            if (!hasTag) {
+                // Xóa tin nhắn nếu không có tag hợp lệ
+                try {
+                    await ctx.deleteMessage(msg.message_id);
+                    const warning = await ctx.reply(`@${msg.from.username || msg.from.first_name}, bài viết của bạn đã bị xóa vì không chứa hashtag #ban hoặc #mua. Vui lòng đọc /rules.`);
+                    // Tự động xóa cảnh báo sau 10 giây
+                    setTimeout(() => {
+                        ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {});
+                    }, 10000);
+                } catch (err) {
+                    console.error('Không có quyền xóa tin nhắn:', err);
+                }
+            } else {
+                // Lưu bài viết hợp lệ vào database
+                db.run(
+                    `INSERT INTO posts (message_id, user_id, content, status) VALUES (?, ?, ?, ?)`,
+                    [msg.message_id, msg.from.id, msg.text, 'approved']
+                );
             }
-        } else {
-            // Lưu bài viết hợp lệ vào database
-            db.run(
-                `INSERT INTO posts (message_id, user_id, content, status) VALUES (?, ?, ?, ?)`,
-                [msg.message_id, msg.from.id, msg.text, 'approved']
-            );
         }
     }
 });
