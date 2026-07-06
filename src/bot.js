@@ -121,6 +121,17 @@ bot.command('gettopicid', (ctx) => {
     }
 });
 
+// --- CHÀO MỪNG THÀNH VIÊN MỚI ---
+bot.on('new_chat_members', (ctx) => {
+    const newMembers = ctx.message.new_chat_members;
+    for (const member of newMembers) {
+        if (member.is_bot) continue; // Bỏ qua nếu là bot khác
+        const name = member.first_name || member.username || 'Thành viên mới';
+        
+        ctx.reply(`👋 Chào mừng **${name}** đã tham gia Chợ 2nd!\n\nHãy gõ /menu để xem hướng dẫn đăng bài và các tính năng săn đồ xịn xò của nhóm nhé!`, { parse_mode: 'Markdown' });
+    }
+});
+
 // --- 6. KIỂM DUYỆT TỰ ĐỘNG ---
 bot.on('text', async (ctx) => {
     const msg = ctx.message;
