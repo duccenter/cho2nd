@@ -1,5 +1,5 @@
-const { Telegraf } = require('telegraf');
-const db = require('./database');
+const { Telegraf, Markup } = require('telegraf');
+const { User, Subscription } = require('./database');
 
 if (!process.env.BOT_TOKEN) {
     console.error('Lỗi: BOT_TOKEN không được tìm thấy trong biến môi trường.');
@@ -7,148 +7,200 @@ if (!process.env.BOT_TOKEN) {
 }
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
+const BAD_WORDS = ['đm', 'vcl', 'địt', 'lồn', 'cặc', 'phò', 'đĩ', 'chó đẻ'];
 
-// Middleware để lưu/cập nhật thông tin người dùng
-bot.use(async (ctx, next) => {
-    if (ctx.from) {
-        const { id, username, first_name, last_name } = ctx.from;
-        db.run(
-            `INSERT INTO users (telegram_id, username, first_name, last_name) 
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(telegram_id) DO UPDATE SET 
-             username=excluded.username, 
-             first_name=excluded.first_name, 
-             last_name=excluded.last_name`,
-            [id, username, first_name, last_name]
-        );
-    }
-    return next();
-});
-
-// Chào mừng thành viên mới
-bot.on('new_chat_members', (ctx) => {
-    const newMembers = ctx.message.new_chat_members;
-    for (const member of newMembers) {
-        const name = member.first_name || member.username || 'Thành viên mới';
-        ctx.reply(`Chào mừng ${name} đã tham gia nhóm bán hàng 2nd! 🎉\nVui lòng đọc quy định nhóm bằng lệnh /rules trước khi đăng bài nhé.`);
-    }
-});
-
-// Lệnh /start
-bot.start((ctx) => {
-    ctx.reply('Xin chào! Tôi là Bot quản lý nhóm bán hàng 2nd. Dùng /help để xem các chức năng.');
-});
-
-// Lệnh /help
-bot.help((ctx) => {
+// --- 1. MENU & START ---
+bot.command(['start', 'help', 'menu'], (ctx) => {
     ctx.reply(
-        'Danh sách lệnh:\n' +
-        '/start - Bắt đầu với bot\n' +
-        '/help - Xem trợ giúp\n' +
-        '/rules - Xem quy định đăng bài'
+        'Chào mừng đến với hệ thống Quản lý Chợ 2nd! Bạn cần giúp gì?',
+        Markup.inlineKeyboard([
+            [Markup.button.callback('👕 Hướng dẫn Đăng bài', 'huong_dan')],
+            [Markup.button.callback('🔔 Săn đồ (Nhận thông báo)', 'san_do')],
+            [Markup.button.callback('⭐ Hệ thống Uy tín', 'uy_tin')]
+        ])
     );
 });
 
-// Lệnh /rules
-bot.command('rules', (ctx) => {
-    ctx.reply(
-        '📜 **Quy định đăng bài:**\n' +
-        '1. Mọi bài viết bán hoặc mua đều phải chứa hashtag #ban hoặc #mua.\n' +
-        '2. Bài viết phải ghi rõ giá cả (ví dụ: Giá: 100k) và tình trạng sản phẩm.\n' +
-        '3. Không spam, không đăng sản phẩm cấm.\n' +
-        'Các bài đăng sai quy định sẽ bị tự động xóa.'
-    , { parse_mode: 'Markdown' });
+bot.action('huong_dan', (ctx) => {
+    ctx.reply('📌 **Hướng dẫn đăng bài:**\nTrong phòng Mua Bán, mọi bài viết BẮT BUỘC phải có hashtag `#ban` hoặc `#mua`.\nNếu bán xong, hãy Reply bài viết của chính bạn và gõ `/daban` để bot dọn rác nhé!', { parse_mode: 'Markdown' });
+    ctx.answerCbQuery();
+});
+bot.action('san_do', (ctx) => {
+    ctx.reply('🔔 **Cách săn đồ:**\nĐể nhận thông báo khi có người bán món đồ bạn cần, hãy nhắn tin riêng (Inbox) cho tôi với cú pháp:\n`/sandothue <từ khóa>`\nVí dụ: `/sandothue iphone 13`', { parse_mode: 'Markdown' });
+    ctx.answerCbQuery();
+});
+bot.action('uy_tin', (ctx) => {
+    ctx.reply('⭐ **Hệ thống Uy tín:**\n- Để cộng điểm uy tín cho người bán: Hãy Reply tin nhắn của họ và gõ `/uytin`\n- Để kiểm tra uy tín: Gõ `/check @username_nguoiban`', { parse_mode: 'Markdown' });
+    ctx.answerCbQuery();
 });
 
-// Lệnh /gettopicid để lấy ID của topic và ID của Group
-bot.command('gettopicid', (ctx) => {
-    if (ctx.message.is_topic_message && ctx.message.message_thread_id) {
-        ctx.reply(`📌 **Thông số để cài đặt trên Render:**\n\n1. Biến **MUABAN_TOPIC_ID** có giá trị là: \`${ctx.message.message_thread_id}\`\n2. Biến **GROUP_CHAT_ID** có giá trị là: \`${ctx.chat.id}\`\n\nHãy vào Render thêm biến thứ 2 (GROUP_CHAT_ID) để bot có thể tự động gửi tin nhắn 8h sáng hàng ngày nhé!`, { parse_mode: 'Markdown' });
-    } else {
-        ctx.reply('Lệnh này chỉ dùng được bên trong một Topic (Chủ đề) của nhóm Diễn đàn (Forum).');
+// --- 2. TÍNH NĂNG ĐÃ BÁN ---
+bot.command('daban', async (ctx) => {
+    const repliedMsg = ctx.message.reply_to_message;
+    if (!repliedMsg) {
+        return ctx.reply('Bạn phải Reply (Trả lời) vào bài đăng bán của chính bạn và gõ /daban.');
+    }
+    // Chỉ cho phép xóa bài của chính mình hoặc admin (giả định tự reply chính mình)
+    if (repliedMsg.from.id !== ctx.message.from.id) {
+        return ctx.reply('Bạn chỉ có thể đánh dấu "đã bán" cho bài viết của CHÍNH BẠN!');
+    }
+    try {
+        await ctx.deleteMessage(repliedMsg.message_id); // Xóa bài gốc
+        await ctx.deleteMessage(ctx.message.message_id); // Xóa luôn lệnh /daban
+        const msg = await ctx.reply(`✅ Cảm ơn bạn, một mặt hàng đã được thanh khoản và dọn dẹp khỏi nhóm!`);
+        setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch(() => {}), 5000);
+    } catch (err) {
+        console.error('Lỗi khi xóa bài daban:', err);
     }
 });
 
-// Danh sách các từ khóa thô tục (Blacklist)
-const BAD_WORDS = ['đm', 'vcl', 'địt', 'lồn', 'cặc', 'phò', 'đĩ', 'chó đẻ'];
+// --- 3. SĂN ĐỒ (INBOX ONLY) ---
+bot.command('sandothue', async (ctx) => {
+    if (ctx.chat.type !== 'private') {
+        return ctx.reply('⚠️ Tính năng /sandothue chỉ hoạt động khi bạn nhắn tin riêng (Inbox) trực tiếp cho bot!');
+    }
+    const keyword = ctx.message.text.split(' ').slice(1).join(' ').toLowerCase();
+    if (!keyword) {
+        return ctx.reply('Vui lòng nhập từ khóa. Ví dụ: /sandothue iphone 13');
+    }
+    try {
+        await Subscription.create({ telegram_id: ctx.message.from.id.toString(), keyword: keyword });
+        ctx.reply(`✅ Đã đăng ký nhận thông báo khi có người bán: **${keyword}**`, { parse_mode: 'Markdown' });
+    } catch (err) {
+        ctx.reply('Lỗi kết nối cơ sở dữ liệu. Hãy kiểm tra biến môi trường MONGO_URI.');
+    }
+});
 
-// Xử lý và kiểm duyệt tin nhắn trong nhóm
+// --- 4. UY TÍN (CỘNG ĐIỂM) ---
+bot.command('uytin', async (ctx) => {
+    const repliedMsg = ctx.message.reply_to_message;
+    if (!repliedMsg) return ctx.reply('Bạn phải Reply (Trả lời) vào tin nhắn của người bạn muốn cộng điểm uy tín.');
+    if (repliedMsg.from.id === ctx.message.from.id) return ctx.reply('Bạn không thể tự cộng điểm cho chính mình!');
+    if (repliedMsg.from.is_bot) return ctx.reply('Không thể cộng điểm cho Bot!');
+
+    try {
+        const targetUser = await User.findOneAndUpdate(
+            { telegram_id: repliedMsg.from.id.toString() },
+            { 
+                $inc: { trust_score: 1 },
+                $set: { 
+                    username: repliedMsg.from.username || '',
+                    first_name: repliedMsg.from.first_name || ''
+                }
+            },
+            { upsert: true, new: true }
+        );
+        ctx.reply(`⭐ Tuyệt vời! Bạn đã cộng 1 điểm uy tín cho **${repliedMsg.from.first_name}**. (Điểm hiện tại: ${targetUser.trust_score})`, { parse_mode: 'Markdown' });
+    } catch (err) {
+        ctx.reply('Lỗi kết nối cơ sở dữ liệu MongoDB.');
+    }
+});
+
+// --- 5. CHECK UY TÍN ---
+bot.command('check', async (ctx) => {
+    const username = ctx.message.text.split(' ')[1];
+    if (!username) return ctx.reply('Vui lòng nhập username. Ví dụ: /check @nguoiban');
+    const cleanUsername = username.replace('@', '');
+    try {
+        const user = await User.findOne({ username: cleanUsername });
+        if (!user) {
+            return ctx.reply(`Chưa có dữ liệu uy tín nào về @${cleanUsername}.`);
+        }
+        ctx.reply(`⭐ Người dùng **@${cleanUsername}** hiện có **${user.trust_score}** điểm uy tín trên hệ thống!`, { parse_mode: 'Markdown' });
+    } catch (err) {
+        ctx.reply('Lỗi kết nối cơ sở dữ liệu.');
+    }
+});
+
+// Lệnh gettopicid (giữ nguyên)
+bot.command('gettopicid', (ctx) => {
+    if (ctx.message.is_topic_message && ctx.message.message_thread_id) {
+        ctx.reply(`📌 **Thông số:**\n1. MUABAN_TOPIC_ID: \`${ctx.message.message_thread_id}\`\n2. GROUP_CHAT_ID: \`${ctx.chat.id}\``, { parse_mode: 'Markdown' });
+    } else {
+        ctx.reply('Lệnh này chỉ dùng được bên trong một Topic.');
+    }
+});
+
+// --- 6. KIỂM DUYỆT TỰ ĐỘNG ---
 bot.on('text', async (ctx) => {
     const msg = ctx.message;
     const text = msg.text.toLowerCase();
-    
-    // Nếu tin nhắn là lệnh thì bỏ qua
     if (text.startsWith('/')) return;
 
-    // Kiểm duyệt bài viết trong nhóm (bỏ qua tin nhắn riêng cho bot)
     if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
         
-        // 1. KIỂM TRA TỪ NGỮ THÔ TỤC (Áp dụng cho mọi Topic)
+        // 6.1. CHỐNG SPAM LINK
+        const hasLink = text.includes('http://') || text.includes('https://') || text.includes('t.me/');
+        if (hasLink) {
+            try {
+                // Kiểm tra xem có phải admin không
+                const member = await ctx.telegram.getChatMember(ctx.chat.id, msg.from.id);
+                if (member.status !== 'creator' && member.status !== 'administrator') {
+                    await ctx.deleteMessage(msg.message_id).catch(() => {});
+                    const warning = await ctx.reply(`🚫 @${msg.from.username || msg.from.first_name}, bạn không được phép gửi Link quảng cáo trong nhóm!`);
+                    setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {}), 10000);
+                    return; // Dừng xử lý
+                }
+            } catch (err) {
+                console.error('Lỗi kiểm tra quyền admin:', err);
+            }
+        }
+
+        // 6.2. LỌC THÔ TỤC
         const hasBadWord = BAD_WORDS.some(word => new RegExp(`\\b${word}\\b`, 'i').test(text));
-        
         if (hasBadWord) {
             try {
-                // Xóa tin nhắn thô tục
                 await ctx.deleteMessage(msg.message_id).catch(() => {});
-                
-                // Khóa chat 1 ngày (86400 giây)
                 const untilDate = Math.floor(Date.now() / 1000) + 86400;
                 await ctx.telegram.restrictChatMember(ctx.chat.id, msg.from.id, {
                     permissions: { can_send_messages: false },
                     until_date: untilDate
                 });
-                
-                // Thông báo công khai
-                await ctx.reply(`🚫 Người dùng @${msg.from.username || msg.from.first_name} đã bị khóa chat 1 ngày do sử dụng ngôn từ thô tục.`);
-            } catch (err) {
-                console.error('Không thể xử lý vi phạm thô tục (có thể do thiếu quyền Admin):', err);
-            }
-            return; // Dừng xử lý tiếp
+                await ctx.reply(`🚫 @${msg.from.username || msg.from.first_name} đã bị khóa chat 1 ngày do dùng từ thô tục.`);
+            } catch (err) {}
+            return;
         }
 
-        // 2. KIỂM TRA ĐỊNH DẠNG MUA BÁN
+        // 6.3. KIỂM DUYỆT ĐỊNH DẠNG MUA BÁN & GỬI THÔNG BÁO SĂN ĐỒ
         const isTopic = msg.is_topic_message;
         const topicId = msg.message_thread_id;
         const muabanTopicId = process.env.MUABAN_TOPIC_ID ? parseInt(process.env.MUABAN_TOPIC_ID) : null;
-
-        // Xác định xem có cần cảnh báo định dạng tin nhắn này không
-        let shouldModerate = false;
+        let isMuaBan = false;
         
-        if (!muabanTopicId) {
-            shouldModerate = true; // Chưa cài đặt Topic thì áp dụng tất cả
-        } else if (isTopic && topicId === muabanTopicId) {
-            shouldModerate = true; // Chỉ áp dụng ở Topic Mua Bán
-        }
+        if (!muabanTopicId) isMuaBan = true;
+        else if (isTopic && topicId === muabanTopicId) isMuaBan = true;
 
-        if (shouldModerate) {
+        if (isMuaBan) {
             const hasTag = text.includes('#ban') || text.includes('#mua');
-            
             if (!hasTag) {
-                // Cảnh báo sai định dạng (NHƯNG KHÔNG XÓA BÀI)
                 try {
-                    const warning = await ctx.reply(`@${msg.from.username || msg.from.first_name}, bài viết của bạn có vẻ sai định dạng (thiếu hashtag #ban hoặc #mua). Vui lòng đọc /rules để sửa lại nhé!`);
-                    
-                    // Tự động xóa cảnh báo sau 15 giây để đỡ rác nhóm
-                    setTimeout(() => {
-                        ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {});
-                    }, 15000);
-                } catch (err) {
-                    console.error('Không thể gửi cảnh báo:', err);
-                }
+                    const warning = await ctx.reply(`@${msg.from.username || msg.from.first_name}, bài viết sai định dạng (thiếu hashtag #ban hoặc #mua). Vui lòng sửa lại!`);
+                    setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {}), 15000);
+                } catch (err) {}
             } else {
-                // Lưu bài viết hợp lệ vào database
-                db.run(
-                    `INSERT INTO posts (message_id, user_id, content, status) VALUES (?, ?, ?, ?)`,
-                    [msg.message_id, msg.from.id, msg.text, 'approved']
-                );
+                // Nếu HỢP LỆ -> Kích hoạt thuật toán SĂN ĐỒ
+                try {
+                    const subs = await Subscription.find();
+                    for (const sub of subs) {
+                        if (text.includes(sub.keyword) && sub.telegram_id !== msg.from.id.toString()) {
+                            // Bắn tin nhắn riêng cho người đăng ký
+                            ctx.telegram.sendMessage(
+                                sub.telegram_id, 
+                                `🔔 **Hàng mới về!**\nCó người vừa đăng bán mặt hàng liên quan tới từ khóa: **${sub.keyword}**\n\nNội dung:\n"${msg.text}"\n\n(Vào nhóm để xem chi tiết nhé!)`,
+                                { parse_mode: 'Markdown' }
+                            ).catch(() => { /* Bỏ qua nếu họ đã block bot */ });
+                        }
+                    }
+                } catch (err) {
+                    console.error('Lỗi khi quét Săn đồ:', err);
+                }
             }
         }
     }
 });
 
-// Bắt lỗi chung để bot không bị crash
 bot.catch((err, ctx) => {
-    console.error(`Có lỗi xảy ra cho update ${ctx.updateType}`, err);
+    console.error(`Có lỗi xảy ra:`, err);
 });
 
 module.exports = bot;

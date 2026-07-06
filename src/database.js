@@ -1,50 +1,37 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-const fs = require('fs');
+const mongoose = require('mongoose');
 
-// Ensure data directory exists
-const dataDir = path.join(__dirname, '../data');
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir);
-}
-
-const dbPath = path.join(dataDir, 'database.sqlite');
-const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) {
-        console.error('Lỗi khi kết nối với SQLite database:', err.message);
-    } else {
-        console.log('Đã kết nối với SQLite database.');
-        initDb();
+// Kết nối cơ sở dữ liệu
+const connectDB = async () => {
+    try {
+        if (!process.env.MONGO_URI) {
+            console.log('⚠️ CHÚ Ý: Chưa có biến môi trường MONGO_URI.');
+            console.log('Bot vẫn sẽ chạy nhưng tính năng Điểm Uy Tín và Săn Đồ sẽ không lưu được dữ liệu!');
+            return;
+        }
+        await mongoose.connect(process.env.MONGO_URI);
+        console.log('✅ Đã kết nối với MongoDB thành công!');
+    } catch (err) {
+        console.error('❌ Lỗi kết nối MongoDB:', err);
     }
+};
+
+// Định nghĩa Cấu trúc Dữ liệu (Schema)
+const UserSchema = new mongoose.Schema({
+    telegram_id: { type: String, required: true, unique: true },
+    username: String,
+    first_name: String,
+    trust_score: { type: Number, default: 0 },
+    joined_at: { type: Date, default: Date.now }
 });
 
-function initDb() {
-    db.serialize(() => {
-        // Tạo bảng lưu trữ thông tin người dùng
-        db.run(`
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                telegram_id TEXT UNIQUE NOT NULL,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
+const SubscriptionSchema = new mongoose.Schema({
+    telegram_id: { type: String, required: true },
+    keyword: { type: String, required: true },
+    created_at: { type: Date, default: Date.now }
+});
 
-        // Tạo bảng lưu trữ các bài đăng bán hàng
-        db.run(`
-            CREATE TABLE IF NOT EXISTS posts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                content TEXT,
-                status TEXT DEFAULT 'pending', -- pending, approved, rejected
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (telegram_id)
-            )
-        `);
-    });
-}
+// Tạo Model
+const User = mongoose.model('User', UserSchema);
+const Subscription = mongoose.model('Subscription', SubscriptionSchema);
 
-module.exports = db;
+module.exports = { connectDB, User, Subscription };
