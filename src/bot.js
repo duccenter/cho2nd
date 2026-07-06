@@ -60,10 +60,10 @@ bot.command('rules', (ctx) => {
     , { parse_mode: 'Markdown' });
 });
 
-// Lệnh /gettopicid để lấy ID của topic hiện tại
+// Lệnh /gettopicid để lấy ID của topic và ID của Group
 bot.command('gettopicid', (ctx) => {
     if (ctx.message.is_topic_message && ctx.message.message_thread_id) {
-        ctx.reply(`ID của Topic này là: ${ctx.message.message_thread_id}\n\nBạn hãy copy số này và dán vào biến môi trường MUABAN_TOPIC_ID trên Render nếu đây là topic Mua Bán nhé.`);
+        ctx.reply(`📌 **Thông số để cài đặt trên Render:**\n\n1. Biến **MUABAN_TOPIC_ID** có giá trị là: \`${ctx.message.message_thread_id}\`\n2. Biến **GROUP_CHAT_ID** có giá trị là: \`${ctx.chat.id}\`\n\nHãy vào Render thêm biến thứ 2 (GROUP_CHAT_ID) để bot có thể tự động gửi tin nhắn 8h sáng hàng ngày nhé!`, { parse_mode: 'Markdown' });
     } else {
         ctx.reply('Lệnh này chỉ dùng được bên trong một Topic (Chủ đề) của nhóm Diễn đàn (Forum).');
     }
