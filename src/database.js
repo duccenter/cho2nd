@@ -31,8 +31,16 @@ const SubscriptionSchema = new mongoose.Schema({
     created_at: { type: Date, default: Date.now }
 });
 
+const ScammerSchema = new mongoose.Schema({
+    target: { type: String, required: true, unique: true }, // Số điện thoại hoặc username
+    reason: { type: String, default: "Lừa đảo" },
+    added_by: { type: String },
+    created_at: { type: Date, default: Date.now }
+});
+
 // Tạo Model
 const User = mongoose.model('User', UserSchema);
 const Subscription = mongoose.model('Subscription', SubscriptionSchema);
+const Scammer = mongoose.model('Scammer', ScammerSchema);
 
-module.exports = { connectDB, User, Subscription };
+module.exports = { connectDB, User, Subscription, Scammer };
