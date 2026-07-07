@@ -239,6 +239,13 @@ bot.on('message', async (ctx) => {
         }
 
         if (isMuaBan) {
+            // Xử lý gửi nhiều ảnh (Album): Telegram sẽ gửi thành nhiều tin nhắn.
+            // Chỉ tin nhắn đầu tiên có caption, các tin nhắn sau không có.
+            // Ta sẽ tạm thời cho phép các ảnh phụ (không có caption) trong album đi qua.
+            if (msg.media_group_id && !msg.caption) {
+                return;
+            }
+
             const hasMedia = (msg.photo !== undefined || msg.video !== undefined);
             
             // Regex cho Giá tiền: số đi kèm k, tr, triệu, đ, vnd hoặc có định dạng x.xxx
