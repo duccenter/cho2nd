@@ -303,7 +303,7 @@ bot.on('message', async (ctx) => {
                     }
 
                     // THÊM NÚT GỌI TRUNG GIAN
-                    await ctx.reply(`✅ Bài đăng của **${msg.from.first_name}** hợp lệ.\n\n🛡️ *Giao dịch an toàn: Nếu bạn thấy nghi ngờ, hãy gọi Admin đứng ra trung gian giữ tiền giúp bạn.*`, {
+                    const successMsg = await ctx.reply(`✅ Bài đăng của **${msg.from.first_name}** hợp lệ.\n\n🛡️ *Giao dịch an toàn: Nếu bạn thấy nghi ngờ, hãy gọi Admin đứng ra trung gian giữ tiền giúp bạn.*`, {
                         reply_to_message_id: msg.message_id,
                         parse_mode: 'Markdown',
                         reply_markup: {
@@ -312,6 +312,9 @@ bot.on('message', async (ctx) => {
                             ]
                         }
                     });
+
+                    // Xóa tin nhắn xác nhận sau 20s để tránh rác nhóm
+                    setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, successMsg.message_id).catch(() => {}), 20000);
 
                 } catch (err) {
                     console.error('Lỗi khi xử lý bài hợp lệ:', err);
