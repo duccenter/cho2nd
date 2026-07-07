@@ -161,7 +161,7 @@ bot.command('check', async (ctx) => {
 // Lệnh gettopicid
 bot.command('gettopicid', (ctx) => {
     if (ctx.message.is_topic_message && ctx.message.message_thread_id) {
-        ctx.reply(`📌 **Thông số:**\n1. MUABAN_TOPIC_ID: \`${ctx.message.message_thread_id}\`\n2. GROUP_CHAT_ID: \`${ctx.chat.id}\``, { parse_mode: 'Markdown' });
+        ctx.reply(`📌 **Thông số:**\n1. MUABAN_TOPIC_ID (của phòng này): \`${ctx.message.message_thread_id}\`\n2. GROUP_CHAT_ID: \`${ctx.chat.id}\`\n\n*(Lưu ý: Nếu có nhiều phòng, hãy ghép các số ID phòng thành 1 chuỗi ngăn cách bằng dấu phẩy, ví dụ: 336,333,330,2)*`, { parse_mode: 'Markdown' });
     } else {
         ctx.reply('Lệnh này chỉ dùng được bên trong một Topic.');
     }
@@ -224,11 +224,19 @@ bot.on('message', async (ctx) => {
         // 7.3. KIỂM DUYỆT ĐỊNH DẠNG MUA BÁN
         const isTopic = msg.is_topic_message;
         const topicId = msg.message_thread_id;
-        const muabanTopicId = process.env.MUABAN_TOPIC_ID ? parseInt(process.env.MUABAN_TOPIC_ID) : null;
-        let isMuaBan = false;
         
-        if (!muabanTopicId) isMuaBan = true;
-        else if (isTopic && topicId === muabanTopicId) isMuaBan = true;
+        const topicIdsStr = process.env.MUABAN_TOPIC_IDS || process.env.MUABAN_TOPIC_ID;
+        let muabanTopicIds = [];
+        if (topicIdsStr) {
+            muabanTopicIds = topicIdsStr.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+        }
+
+        let isMuaBan = false;
+        if (muabanTopicIds.length === 0) {
+            isMuaBan = true; // Nếu chưa cấu hình, coi như phòng nào cũng kiểm duyệt
+        } else if (isTopic && muabanTopicIds.includes(topicId)) {
+            isMuaBan = true;
+        }
 
         if (isMuaBan) {
             const hasMedia = (msg.photo !== undefined || msg.video !== undefined);
