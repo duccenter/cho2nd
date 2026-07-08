@@ -26,7 +26,7 @@ bot.action('huong_dan', (ctx) => {
     ctx.answerCbQuery();
 });
 bot.action('san_do', (ctx) => {
-    ctx.reply('🔔 **Cách săn đồ:**\nĐể nhận thông báo khi có người bán món đồ bạn cần, hãy nhắn tin riêng (Inbox) cho tôi với cú pháp:\n`/sandothue <từ khóa>`\nVí dụ: `/sandothue iphone 13`', { parse_mode: 'Markdown' });
+    ctx.reply('🔔 **Cách săn đồ:**\nĐể nhận thông báo khi có người bán món đồ bạn cần, hãy nhắn tin riêng (Inbox) cho tôi với cú pháp:\n`/tim <từ khóa>`\nVí dụ: `/tim iphone 13`', { parse_mode: 'Markdown' });
     ctx.answerCbQuery();
 });
 bot.action('uy_tin', (ctx) => {
@@ -66,13 +66,13 @@ bot.command('daban', async (ctx) => {
 });
 
 // --- 3. SĂN ĐỒ (INBOX ONLY) ---
-bot.command('sandothue', async (ctx) => {
+bot.command('tim', async (ctx) => {
     if (ctx.chat.type !== 'private') {
-        return ctx.reply('⚠️ Tính năng /sandothue chỉ hoạt động khi bạn nhắn tin riêng (Inbox) trực tiếp cho bot!');
+        return ctx.reply('⚠️ Tính năng /tim chỉ hoạt động khi bạn nhắn tin riêng (Inbox) trực tiếp cho bot!');
     }
     const keyword = ctx.message.text.split(' ').slice(1).join(' ').toLowerCase();
     if (!keyword) {
-        return ctx.reply('Vui lòng nhập từ khóa. Ví dụ: /sandothue iphone 13');
+        return ctx.reply('Vui lòng nhập từ khóa. Ví dụ: /tim iphone 13');
     }
     try {
         await Subscription.create({ telegram_id: ctx.message.from.id.toString(), keyword: keyword });
