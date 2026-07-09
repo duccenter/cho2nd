@@ -53,8 +53,10 @@ console.log('Đang kết nối CSDL và khởi động Telegram Bot...');
 
 // Kết nối CSDL trước khi kích hoạt Bot
 db.connectDB().then(() => {
-    // Kích hoạt bot
-    bot.launch()
+    // Kích hoạt bot với allowedUpdates để nhận sự kiện chat_member
+    bot.launch({
+        allowedUpdates: ['message', 'callback_query', 'chat_member']
+    })
         .then(() => {
             console.log('Bot đã khởi động thành công!');
             

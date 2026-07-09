@@ -16,7 +16,8 @@ bot.command(['start', 'help', 'menu'], (ctx) => {
         Markup.inlineKeyboard([
             [Markup.button.callback('👕 Hướng dẫn Đăng bài', 'huong_dan')],
             [Markup.button.callback('🔔 Săn đồ (Nhận thông báo)', 'san_do')],
-            [Markup.button.callback('⭐ Hệ thống Uy tín', 'uy_tin')]
+            [Markup.button.callback('⭐ Hệ thống Uy tín', 'uy_tin')],
+            [Markup.button.callback('🤝 Tạo Link Chia Sẻ', 'tao_link')]
         ])
     );
 });
@@ -31,6 +32,30 @@ bot.action('san_do', (ctx) => {
 });
 bot.action('uy_tin', (ctx) => {
     ctx.reply('⭐ **Hệ thống Uy tín:**\n- Để cộng điểm uy tín cho người bán: Hãy Reply tin nhắn của họ và gõ `/uytin`\n- Để tra cứu SĐT hoặc Username có lừa đảo không: Gõ `/check <sdt/username>`', { parse_mode: 'Markdown' });
+    ctx.answerCbQuery();
+});
+
+bot.action('tao_link', async (ctx) => {
+    if (ctx.chat.type !== 'private') {
+        return ctx.reply('⚠️ Vui lòng nhắn tin riêng (Inbox) cho Bot và gõ /menu để tạo link chia sẻ nhé!');
+    }
+    
+    const chatId = process.env.GROUP_CHAT_ID;
+    if (!chatId) {
+        return ctx.reply('Chưa cấu hình GROUP_CHAT_ID.');
+    }
+    
+    try {
+        const inviteLink = await ctx.telegram.createChatInviteLink(chatId, {
+            name: `ref_${ctx.from.id}`,
+            creates_join_request: false
+        });
+        
+        await ctx.reply(`🎉 **Đây là Link Giới Thiệu Độc Quyền của bạn:**\n\n${inviteLink.invite_link}\n\nKhi có người tham gia nhóm thông qua link này, bạn sẽ được:\n- Cộng 2 Điểm Uy Tín\n- Phong tước hiệu Admin danh dự nếu đạt mốc 3, 10, 50 người!`, { parse_mode: 'Markdown' });
+    } catch (err) {
+        console.error('Lỗi tạo link:', err);
+        ctx.reply('❌ Có lỗi xảy ra. Vui lòng đảm bảo Bot là Admin của nhóm và có quyền "Invite Users" (Thêm thành viên).');
+    }
     ctx.answerCbQuery();
 });
 
@@ -174,6 +199,61 @@ bot.on('new_chat_members', (ctx) => {
         if (member.is_bot) continue;
         const name = member.first_name || member.username || 'Thành viên mới';
         ctx.reply(`👋 Chào mừng **${name}** đã tham gia Chợ 2nd!\n\nHãy gõ /menu để xem hướng dẫn đăng bài và các tính năng săn đồ xịn xò của nhóm nhé!`, { parse_mode: 'Markdown' });
+    }
+});
+
+// --- XỬ LÝ NHẬN DIỆN LINK GIỚI THIỆU ---
+bot.on('chat_member', async (ctx) => {
+    const newMember = ctx.chatMember.new_chat_member;
+    const oldMember = ctx.chatMember.old_chat_member;
+    const inviteLink = ctx.chatMember.invite_link;
+
+    const isJoining = (oldMember.status === 'left' || oldMember.status === 'kicked') && newMember.status === 'member';
+
+    if (isJoining && inviteLink && inviteLink.name && inviteLink.name.startsWith('ref_')) {
+        const inviterId = inviteLink.name.split('_')[1];
+        
+        try {
+            // Cập nhật Database
+            const inviter = await User.findOneAndUpdate(
+                { telegram_id: inviterId },
+                { $inc: { trust_score: 2, invite_count: 1 } },
+                { new: true }
+            );
+
+            if (inviter) {
+                let customTitle = null;
+                const count = inviter.invite_count;
+                
+                if (count === 3) customTitle = "Chiến Thần Chốt Đơn";
+                else if (count === 10) customTitle = "Khách Hàng VIP";
+                else if (count === 50) customTitle = "Ông Trùm Chợ 2nd";
+
+                let titleMsg = '';
+                if (customTitle) {
+                    try {
+                        // Thăng quyền admin ảo và set danh hiệu
+                        await ctx.telegram.promoteChatMember(ctx.chat.id, parseInt(inviterId), {
+                            can_manage_chat: true,
+                            can_change_info: false,
+                            can_delete_messages: false,
+                            can_invite_users: false,
+                            can_restrict_members: false,
+                            can_pin_messages: false,
+                            can_promote_members: false
+                        });
+                        await ctx.telegram.setChatAdministratorCustomTitle(ctx.chat.id, parseInt(inviterId), customTitle);
+                        titleMsg = `\n👑 Đặc biệt: Đã được thăng cấp tước hiệu **"${customTitle}"**!`;
+                    } catch (err) {
+                        console.error('Lỗi khi set Custom Title:', err);
+                    }
+                }
+
+                await ctx.reply(`🎉 Người mới **${newMember.user.first_name}** vừa gia nhập!\n\n👏 Người giới thiệu: [${inviter.first_name || 'Thành viên'}](tg://user?id=${inviter.telegram_id})\n🎁 Phần thưởng: +2 Điểm Uy Tín (Tổng đã mời: ${count} người)${titleMsg}`, { parse_mode: 'Markdown' });
+            }
+        } catch (err) {
+            console.error('Lỗi xử lý refer:', err);
+        }
     }
 });
 
