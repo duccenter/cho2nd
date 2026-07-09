@@ -18,7 +18,8 @@ bot.command(['start', 'help', 'menu'], (ctx) => {
             [Markup.button.callback('🔔 Săn đồ (Nhận thông báo)', 'san_do')],
             [Markup.button.callback('⭐ Hệ thống Uy tín', 'uy_tin')],
             [Markup.button.callback('🤝 Tạo Link Chia Sẻ', 'tao_link')],
-            [Markup.button.callback('✍️ Trợ lý Lên Form', 'tao_form')]
+            [Markup.button.callback('✍️ Trợ lý Lên Form', 'tao_form')],
+            [Markup.button.callback('🔓 Mở khóa Chat', 'mo_khoa')]
         ])
     );
 });
@@ -56,6 +57,41 @@ bot.action('tao_link', async (ctx) => {
     } catch (err) {
         console.error('Lỗi tạo link:', err);
         ctx.reply('❌ Có lỗi xảy ra. Vui lòng đảm bảo Bot là Admin của nhóm và có quyền "Invite Users" (Thêm thành viên).');
+    }
+    ctx.answerCbQuery();
+});
+
+// --- XỬ LÝ MỞ KHÓA CHAT ---
+bot.action('mo_khoa', async (ctx) => {
+    if (ctx.chat.type !== 'private') return ctx.answerCbQuery();
+    const chatId = process.env.GROUP_CHAT_ID;
+    if (!chatId) return ctx.reply('⚠️ Chưa cấu hình ID Nhóm.');
+
+    try {
+        const member = await ctx.telegram.getChatMember(chatId, ctx.from.id);
+        
+        // Nếu đang bị cấm chat có thời hạn (do vi phạm luật)
+        if (member.status === 'restricted' && member.until_date && member.until_date > Math.floor(Date.now() / 1000)) {
+            return ctx.reply('🚫 TÀI KHOẢN BỊ PHẠT: Bạn đang trong thời gian bị khóa mõm do vi phạm nội quy (chửi thề, spam...). Hãy đợi hết thời gian phạt nhé!');
+        }
+
+        if (member.status === 'left' || member.status === 'kicked') {
+            return ctx.reply('⚠️ Bạn hiện không có mặt trong nhóm Chợ 2nd!');
+        }
+
+        // Mở khóa
+        await ctx.telegram.restrictChatMember(chatId, ctx.from.id, {
+            permissions: {
+                can_send_messages: true, can_send_audios: true, can_send_documents: true,
+                can_send_photos: true, can_send_videos: true, can_send_video_notes: true,
+                can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true,
+                can_add_web_page_previews: true, can_change_info: true, can_invite_users: true,
+                can_pin_messages: true, can_manage_topics: true
+            }
+        });
+        ctx.reply('✅ **MỞ KHÓA THÀNH CÔNG!**\n\nBạn đã có thể nhắn tin và đăng bài trong nhóm Chợ 2nd. Chúc bạn mua may bán đắt!', { parse_mode: 'Markdown' });
+    } catch (err) {
+        ctx.reply('❌ Có lỗi xảy ra, Bot không đủ quyền hạn hoặc bạn không ở trong nhóm.');
     }
     ctx.answerCbQuery();
 });
