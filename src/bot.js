@@ -159,6 +159,31 @@ bot.command('scam', async (ctx) => {
     }
 });
 
+// LỆNH TEST ẨN (CHỈ ADMIN) ĐỂ NHẬN DANH HIỆU
+bot.command('testpromote', async (ctx) => {
+    if (ctx.from.username !== 'diticomsvn') return ctx.reply('🚫 Chỉ Admin mới được dùng lệnh này!');
+    try {
+        await User.findOneAndUpdate(
+            { telegram_id: ctx.from.id.toString() },
+            { $set: { invite_count: 50, trust_score: 100 } },
+            { upsert: true }
+        );
+        await ctx.telegram.promoteChatMember(ctx.chat.id, ctx.from.id, {
+            can_manage_chat: true,
+            can_change_info: false,
+            can_delete_messages: false,
+            can_invite_users: false,
+            can_restrict_members: false,
+            can_pin_messages: false,
+            can_promote_members: false
+        });
+        await ctx.telegram.setChatAdministratorCustomTitle(ctx.chat.id, ctx.from.id, "Ông Trùm Chợ 2nd");
+        ctx.reply('👑 Đã hack thành công! Bạn vừa được thăng cấp lên hạng cao nhất: **Ông Trùm Chợ 2nd** (Kèm 100 Điểm Uy Tín)!', { parse_mode: 'Markdown' });
+    } catch (err) {
+        ctx.reply('Lỗi (Có thể Bot chưa đủ quyền Admin để trao danh hiệu): ' + err.message);
+    }
+});
+
 // --- 6. CHECK UY TÍN & SỔ ĐEN ---
 bot.command('check', async (ctx) => {
     const target = ctx.message.text.split(' ')[1];
