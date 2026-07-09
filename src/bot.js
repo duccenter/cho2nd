@@ -63,7 +63,7 @@ bot.action('tao_link', async (ctx) => {
 bot.action(/escrow_(.+)/, async (ctx) => {
     const sellerId = ctx.match[1];
     const buyer = ctx.from;
-    const adminUsername = 'diticomsvn'; // Username Admin được cấu hình cứng
+    const adminUsername = 'diticoms_vn'; // Username Admin được cấu hình cứng
 
     await ctx.reply(`🔔 **YÊU CẦU TRUNG GIAN GIAO DỊCH**\n\nNgười mua: [${buyer.first_name}](tg://user?id=${buyer.id})\nNgười bán: [Seller](tg://user?id=${sellerId})\nAdmin hỗ trợ: @${adminUsername}\n\nXin mời Admin @${adminUsername} tạo nhóm riêng với 2 bạn này để tiến hành giao dịch an toàn!`, { parse_mode: 'Markdown' });
     await ctx.answerCbQuery('Đã gửi yêu cầu gọi Admin!');
@@ -134,9 +134,8 @@ bot.command('uytin', async (ctx) => {
 
 // --- 5. LỆNH SCAM (THÊM SỔ ĐEN) ---
 bot.command('scam', async (ctx) => {
-    // Chỉ Admin mới được dùng lệnh này (kiểm tra đơn giản bằng hardcode username admin)
-    if (ctx.from.username !== 'diticomsvn') {
-        return ctx.reply('🚫 Chỉ Admin @diticomsvn mới có quyền thêm vào Sổ Đen!');
+    if (!['diticomsvn', 'diticoms_vn'].includes(ctx.from.username)) {
+        return ctx.reply('🚫 Chỉ Admin @diticoms_vn mới có quyền thêm vào Sổ Đen!');
     }
     
     const args = ctx.message.text.split(' ').slice(1);
@@ -161,7 +160,7 @@ bot.command('scam', async (ctx) => {
 
 // LỆNH TEST ẨN (CHỈ ADMIN) ĐỂ NHẬN DANH HIỆU
 bot.command('testpromote', async (ctx) => {
-    if (ctx.from.username !== 'diticomsvn') return ctx.reply('🚫 Chỉ Admin mới được dùng lệnh này!');
+    if (!['diticomsvn', 'diticoms_vn'].includes(ctx.from.username)) return ctx.reply('🚫 Chỉ Admin mới được dùng lệnh này!');
     try {
         await User.findOneAndUpdate(
             { telegram_id: ctx.from.id.toString() },
