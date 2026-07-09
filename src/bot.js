@@ -10,7 +10,18 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const BAD_WORDS = ['đm', 'vcl', 'địt', 'lồn', 'cặc', 'phò', 'đĩ', 'chó đẻ'];
 
 // --- 1. MENU & START ---
-bot.command(['start', 'help', 'menu'], (ctx) => {
+bot.command(['start', 'help', 'menu'], async (ctx) => {
+    if (ctx.chat && ctx.chat.type !== 'private') {
+        try {
+            const msg = await ctx.reply('⚠️ Vui lòng nhắn tin riêng (Inbox) cho Bot để xem Menu và sử dụng các tính năng!');
+            setTimeout(() => {
+                ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch(() => {});
+                ctx.deleteMessage().catch(() => {});
+            }, 10000);
+        } catch (err) {}
+        return;
+    }
+
     ctx.reply(
         'Chào mừng đến với hệ thống Quản lý Chợ 2nd! Bạn cần giúp gì?',
         Markup.inlineKeyboard([
