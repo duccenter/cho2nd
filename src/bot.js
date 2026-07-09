@@ -17,7 +17,8 @@ bot.command(['start', 'help', 'menu'], (ctx) => {
             [Markup.button.callback('👕 Hướng dẫn Đăng bài', 'huong_dan')],
             [Markup.button.callback('🔔 Săn đồ (Nhận thông báo)', 'san_do')],
             [Markup.button.callback('⭐ Hệ thống Uy tín', 'uy_tin')],
-            [Markup.button.callback('🤝 Tạo Link Chia Sẻ', 'tao_link')]
+            [Markup.button.callback('🤝 Tạo Link Chia Sẻ', 'tao_link')],
+            [Markup.button.callback('✍️ Trợ lý Lên Form', 'tao_form')]
         ])
     );
 });
@@ -57,6 +58,36 @@ bot.action('tao_link', async (ctx) => {
         ctx.reply('❌ Có lỗi xảy ra. Vui lòng đảm bảo Bot là Admin của nhóm và có quyền "Invite Users" (Thêm thành viên).');
     }
     ctx.answerCbQuery();
+});
+
+// --- XỬ LÝ TRỢ LÝ LÊN FORM ---
+bot.action('tao_form', async (ctx) => {
+    if (ctx.chat.type !== 'private') {
+        return ctx.reply('⚠️ Tính năng này chỉ dùng trong Tin nhắn riêng (Inbox) với Bot!');
+    }
+    try {
+        await User.findOneAndUpdate(
+            { telegram_id: ctx.from.id.toString() },
+            { $set: { post_builder_state: 'waiting_name', post_draft: {} } },
+            { upsert: true }
+        );
+        ctx.reply('Bắt đầu lên form bài viết! \n\n1️⃣ **Bạn đang bán sản phẩm gì?** (Ví dụ: iPhone 13 Pro Max)\n*(Gõ /cancel bất cứ lúc nào để thoát)*', { parse_mode: 'Markdown' });
+    } catch (err) {
+        ctx.reply('Lỗi hệ thống.');
+    }
+    ctx.answerCbQuery();
+});
+
+bot.command('cancel', async (ctx) => {
+    if (ctx.chat.type === 'private') {
+        try {
+            await User.findOneAndUpdate(
+                { telegram_id: ctx.from.id.toString() },
+                { $set: { post_builder_state: 'none', post_draft: {} } }
+            );
+            ctx.reply('Đã hủy quá trình tạo form bài viết.');
+        } catch (err) {}
+    }
 });
 
 // --- XỬ LÝ NÚT TRUNG GIAN GIAO DỊCH ---
@@ -216,13 +247,56 @@ bot.command('gettopicid', (ctx) => {
     }
 });
 
-// --- CHÀO MỪNG THÀNH VIÊN MỚI ---
-bot.on('new_chat_members', (ctx) => {
+// --- CHÀO MỪNG & CAPTCHA NGƯỜI MỚI ---
+bot.on('new_chat_members', async (ctx) => {
     const newMembers = ctx.message.new_chat_members;
     for (const member of newMembers) {
         if (member.is_bot) continue;
         const name = member.first_name || member.username || 'Thành viên mới';
-        ctx.reply(`👋 Chào mừng **${name}** đã tham gia Chợ 2nd!\n\nHãy gõ /menu để xem hướng dẫn đăng bài và các tính năng săn đồ xịn xò của nhóm nhé!`, { parse_mode: 'Markdown' });
+        
+        try {
+            await ctx.telegram.restrictChatMember(ctx.chat.id, member.id, {
+                permissions: { can_send_messages: false }
+            });
+
+            await ctx.reply(
+                `👋 Chào mừng **${name}** đã tham gia Chợ 2nd!\n\n⚠️ Để bảo vệ nhóm khỏi Bot tự động, vui lòng bấm nút bên dưới để mở khóa chat!`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '✅ Tôi là người thật (Mở khóa)', callback_data: `captcha_${member.id}` }]
+                        ]
+                    }
+                }
+            );
+        } catch (err) {
+            console.error('Lỗi khi xử lý Captcha:', err);
+        }
+    }
+});
+
+bot.action(/captcha_(.+)/, async (ctx) => {
+    const targetId = ctx.match[1];
+    if (ctx.from.id.toString() !== targetId) {
+        return ctx.answerCbQuery('⚠️ Nút này không dành cho bạn!', { show_alert: true });
+    }
+
+    try {
+        await ctx.telegram.restrictChatMember(ctx.chat.id, parseInt(targetId), {
+            permissions: {
+                can_send_messages: true, can_send_audios: true, can_send_documents: true,
+                can_send_photos: true, can_send_videos: true, can_send_video_notes: true,
+                can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true,
+                can_add_web_page_previews: true, can_change_info: true, can_invite_users: true,
+                can_pin_messages: true, can_manage_topics: true
+            }
+        });
+        
+        ctx.answerCbQuery('✅ Xác thực thành công! Bạn đã có thể chat.');
+        await ctx.deleteMessage();
+    } catch (err) {
+        ctx.answerCbQuery('❌ Lỗi mở khóa.');
     }
 });
 
@@ -281,19 +355,76 @@ bot.on('chat_member', async (ctx) => {
     }
 });
 
-// --- 7. KIỂM DUYỆT TỰ ĐỘNG (BẮT ẢNH, GIÁ, SĐT) ---
+// --- 7. KIỂM DUYỆT TỰ ĐỘNG & POST BUILDER ---
 bot.on('message', async (ctx) => {
     const msg = ctx.message;
-    // Bỏ qua nếu là các message hệ thống không có text/caption (ví dụ new_chat_members)
-    if (!msg.text && !msg.caption && !msg.photo && !msg.video) return;
+    const text = (msg.text || msg.caption || '');
+    const isPrivate = ctx.chat.type === 'private';
 
-    const text = (msg.text || msg.caption || '').toLowerCase();
-    
-    // Nếu là lệnh thì bỏ qua
+    // XỬ LÝ INBOX (POST BUILDER)
+    if (isPrivate && msg.text && !msg.text.startsWith('/')) {
+        try {
+            const user = await User.findOne({ telegram_id: ctx.from.id.toString() });
+            if (user && user.post_builder_state !== 'none') {
+                const state = user.post_builder_state;
+                const draft = user.post_draft || {};
+
+                if (state === 'waiting_name') {
+                    draft.name = msg.text;
+                    await User.updateOne({ _id: user._id }, { post_builder_state: 'waiting_condition', post_draft: draft });
+                    return ctx.reply('2️⃣ **Tình trạng sản phẩm ra sao?** (Ví dụ: Mới 99%, zin ốc, xước nhẹ...)', { parse_mode: 'Markdown' });
+                }
+                if (state === 'waiting_condition') {
+                    draft.condition = msg.text;
+                    await User.updateOne({ _id: user._id }, { post_builder_state: 'waiting_price', post_draft: draft });
+                    return ctx.reply('3️⃣ **Giá bạn muốn bán là bao nhiêu?** (Ví dụ: 15.500.000 VNĐ)', { parse_mode: 'Markdown' });
+                }
+                if (state === 'waiting_price') {
+                    draft.price = msg.text;
+                    await User.updateOne({ _id: user._id }, { post_builder_state: 'waiting_area', post_draft: draft });
+                    return ctx.reply('4️⃣ **Khu vực giao dịch của bạn ở đâu?** (Ví dụ: Quận 1, TP.HCM / Ship COD toàn quốc)', { parse_mode: 'Markdown' });
+                }
+                if (state === 'waiting_area') {
+                    draft.area = msg.text;
+                    await User.updateOne({ _id: user._id }, { post_builder_state: 'waiting_phone', post_draft: draft });
+                    return ctx.reply('5️⃣ **Số điện thoại liên hệ của bạn?** (Ví dụ: 0987654321)', { parse_mode: 'Markdown' });
+                }
+                if (state === 'waiting_phone') {
+                    draft.phone = msg.text;
+                    await User.updateOne({ _id: user._id }, { post_builder_state: 'none', post_draft: {} });
+                    
+                    const finalPost = `📦 **SẢN PHẨM:** ${draft.name}\n\n` +
+                                      `✨ **Tình trạng:** ${draft.condition}\n` +
+                                      `💰 **Giá bán:** ${draft.price}\n` +
+                                      `📍 **Khu vực:** ${draft.area}\n` +
+                                      `📞 **Liên hệ:** ${draft.phone}\n\n` +
+                                      `*(Vui lòng copy đoạn văn bản trên, ra ngoài nhóm đính kèm hình ảnh và gửi đi)*`;
+                                      
+                    return ctx.reply(finalPost, { parse_mode: 'Markdown' });
+                }
+            }
+        } catch (err) {}
+    }
+
+    // Bỏ qua nếu là các message hệ thống không có media/text trong nhóm
+    if (!msg.text && !msg.caption && !msg.photo && !msg.video) return;
     if (text.startsWith('/')) return;
 
     if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
         
+        // 7.0 KỶ LUẬT SẢNH CHUNG (Không có topic id)
+        if (!msg.message_thread_id) {
+            const adminUsernames = ['diticomsvn', 'diticoms_vn'];
+            if (!adminUsernames.includes(ctx.from.username)) {
+                try {
+                    await ctx.deleteMessage(msg.message_id).catch(() => {});
+                    const warning = await ctx.reply(`⚠️ @${msg.from.username || msg.from.first_name}, Sảnh Chung chỉ dùng để nhận thông báo từ Bot. Vui lòng nhắn tin vào Topic **"1. Thảo Luận - Hỏi Đáp"**!`, { parse_mode: 'Markdown' });
+                    setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {}), 10000);
+                } catch (e) {}
+                return; // Dừng xử lý
+            }
+        }
+
         // 7.1. CHỐNG SPAM LINK
         const hasLink = text.includes('http://') || text.includes('https://') || text.includes('t.me/');
         if (hasLink) {
@@ -343,19 +474,10 @@ bot.on('message', async (ctx) => {
         }
 
         if (isMuaBan) {
-            // Xử lý gửi nhiều ảnh (Album): Telegram sẽ gửi thành nhiều tin nhắn.
-            // Chỉ tin nhắn đầu tiên có caption, các tin nhắn sau không có.
-            // Ta sẽ tạm thời cho phép các ảnh phụ (không có caption) trong album đi qua.
-            if (msg.media_group_id && !msg.caption) {
-                return;
-            }
+            if (msg.media_group_id && !msg.caption) return;
 
             const hasMedia = (msg.photo !== undefined || msg.video !== undefined);
-            
-            // Regex cho Giá tiền: số đi kèm k, tr, triệu, đ, vnd hoặc có định dạng x.xxx
             const hasPrice = /\b(\d+[k|tr|triệu|đ|vnd]|\d{1,3}([\.\,]\d{3})+)\b/i.test(text);
-            
-            // Regex cho SĐT: 9-11 số liên tiếp (bắt đầu bằng 0)
             const hasPhone = /\b(0[3|5|7|8|9])+([0-9]{8})\b/.test(text);
 
             if (!hasMedia || !hasPrice || !hasPhone) {
@@ -381,7 +503,6 @@ bot.on('message', async (ctx) => {
                     const now = new Date();
                     const diffMins = (now - new Date(user.last_posted_at || 0)) / 1000 / 60;
 
-                    // Giới hạn 5 phút mỗi bài
                     if (diffMins < 5) {
                         await ctx.deleteMessage(msg.message_id).catch(() => {});
                         const warning = await ctx.reply(`🚫 @${msg.from.username || msg.from.first_name}, bạn đăng bài quá nhanh! Vui lòng chờ ${Math.ceil(5 - diffMins)} phút nữa để đăng bài tiếp theo.`);
@@ -389,24 +510,20 @@ bot.on('message', async (ctx) => {
                         return; // Dừng xử lý
                     }
 
-                    // Cập nhật thời gian đăng bài mới nhất
                     user.last_posted_at = now;
                     await user.save();
 
-                    // Kích hoạt thuật toán SĂN ĐỒ
                     const subs = await Subscription.find();
                     for (const sub of subs) {
                         if (text.includes(sub.keyword) && sub.telegram_id !== msg.from.id.toString()) {
-                            // Bắn tin nhắn riêng cho người đăng ký
                             ctx.telegram.sendMessage(
                                 sub.telegram_id, 
                                 `🔔 **Hàng mới về!**\nCó người vừa đăng bán mặt hàng liên quan tới từ khóa: **${sub.keyword}**\n\nNội dung:\n"${text.substring(0, 50)}..."\n\n(Vào nhóm để xem chi tiết nhé!)`,
                                 { parse_mode: 'Markdown' }
-                            ).catch(() => { /* Bỏ qua nếu họ đã block bot */ });
+                            ).catch(() => {});
                         }
                     }
 
-                    // THÊM NÚT GỌI TRUNG GIAN
                     const successMsg = await ctx.reply(`✅ Bài đăng của **${msg.from.first_name}** hợp lệ.\n\n🛡️ *Giao dịch an toàn: Nếu bạn thấy nghi ngờ, hãy gọi Admin đứng ra trung gian giữ tiền giúp bạn.*`, {
                         reply_to_message_id: msg.message_id,
                         parse_mode: 'Markdown',
@@ -417,7 +534,6 @@ bot.on('message', async (ctx) => {
                         }
                     });
 
-                    // Xóa tin nhắn xác nhận sau 20s để tránh rác nhóm
                     setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, successMsg.message_id).catch(() => {}), 20000);
 
                 } catch (err) {

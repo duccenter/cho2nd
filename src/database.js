@@ -22,6 +22,8 @@ const UserSchema = new mongoose.Schema({
     first_name: String,
     trust_score: { type: Number, default: 0 },
     invite_count: { type: Number, default: 0 },
+    post_builder_state: { type: String, default: 'none' },
+    post_draft: { type: Object, default: {} },
     joined_at: { type: Date, default: Date.now },
     last_posted_at: { type: Date, default: 0 } // Dùng cho Anti-Flood
 });
