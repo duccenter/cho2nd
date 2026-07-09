@@ -259,8 +259,8 @@ bot.on('new_chat_members', async (ctx) => {
                 permissions: { can_send_messages: false }
             });
 
-            await ctx.reply(
-                `👋 Chào mừng **${name}** đã tham gia Chợ 2nd!\n\n⚠️ Để bảo vệ nhóm khỏi Bot tự động, vui lòng bấm nút bên dưới để mở khóa chat!`,
+            const captchaMsg = await ctx.reply(
+                `👋 Chào mừng **${name}** đã tham gia Chợ 2nd!\n\n⚠️ Để bảo vệ nhóm khỏi Bot tự động, vui lòng bấm nút bên dưới để mở khóa chat! (Tin nhắn tự hủy sau 2 phút)`,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: {
@@ -270,6 +270,11 @@ bot.on('new_chat_members', async (ctx) => {
                     }
                 }
             );
+
+            // Tự động dọn rác: Xóa nút Captcha sau 2 phút để không làm rác Sảnh Chung
+            setTimeout(() => {
+                ctx.telegram.deleteMessage(ctx.chat.id, captchaMsg.message_id).catch(() => {});
+            }, 120000);
         } catch (err) {
             console.error('Lỗi khi xử lý Captcha:', err);
         }
