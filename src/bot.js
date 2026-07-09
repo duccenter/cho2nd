@@ -15,8 +15,8 @@ bot.command(['start', 'help', 'menu'], (ctx) => {
         'Chào mừng đến với hệ thống Quản lý Chợ 2nd! Bạn cần giúp gì?',
         Markup.inlineKeyboard([
             [Markup.button.callback('👕 Hướng dẫn Đăng bài', 'huong_dan')],
-            [Markup.button.callback('🔔 Săn đồ (Nhận thông báo)', 'san_do')],
-            [Markup.button.callback('⭐ Hệ thống Uy tín', 'uy_tin')],
+            [Markup.button.callback('🔔 Săn đồ', 'san_do'), Markup.button.callback('📋 Quản lý đồ săn', 'quanly_btn')],
+            [Markup.button.callback('⭐ Hệ thống Uy tín', 'uy_tin'), Markup.button.callback('👤 Hồ sơ cá nhân', 'profile_btn')],
             [Markup.button.callback('🤝 Tạo Link Chia Sẻ', 'tao_link')],
             [Markup.button.callback('✍️ Trợ lý Lên Form', 'tao_form')],
             [Markup.button.callback('🔓 Mở khóa Chat', 'mo_khoa')]
@@ -125,6 +125,99 @@ bot.command('cancel', async (ctx) => {
         } catch (err) {}
     }
 });
+
+// --- THẺ PROFILE ---
+const handleProfile = async (ctx) => {
+    try {
+        const user = await User.findOne({ telegram_id: ctx.from.id.toString() });
+        if (!user) {
+            return ctx.reply('⚠️ Bạn chưa có hồ sơ trên hệ thống. Hãy tương tác nhiều hơn để hệ thống ghi nhận nhé!');
+        }
+
+        let customTitle = "Thành viên Tập sự";
+        const count = user.invite_count || 0;
+        if (count >= 50) customTitle = "Ông Trùm Chợ 2nd";
+        else if (count >= 10) customTitle = "Khách Hàng VIP";
+        else if (count >= 3) customTitle = "Chiến Thần Chốt Đơn";
+        else if (user.trust_score > 0) customTitle = "Thương Nhân Uy Tín";
+
+        const joinedDate = new Date(user.joined_at || Date.now()).toLocaleDateString('vi-VN');
+
+        const profileText = `🪪 **THẺ CĂN CƯỚC CHỢ 2ND**\n\n` +
+            `👤 **Tên:** ${user.first_name || ctx.from.first_name}\n` +
+            `👑 **Chức danh:** ${customTitle}\n` +
+            `⭐ **Điểm Uy Tín:** ${user.trust_score || 0}\n` +
+            `🤝 **Số người đã mời:** ${count}\n` +
+            `📅 **Gia nhập:** ${joinedDate}\n\n` +
+            `*(Giao dịch uy tín và mời thêm bạn bè để nâng cấp tước hiệu nhé!)*`;
+
+        ctx.reply(profileText, { parse_mode: 'Markdown' });
+    } catch (err) {
+        ctx.reply('Lỗi truy xuất hồ sơ.');
+    }
+    if (ctx.callbackQuery) ctx.answerCbQuery();
+};
+bot.command('profile', handleProfile);
+bot.action('profile_btn', handleProfile);
+
+// --- QUẢN LÝ SĂN ĐỒ ---
+const handleQuanLy = async (ctx) => {
+    if (ctx.chat && ctx.chat.type !== 'private') {
+        const msg = await ctx.reply('⚠️ Vui lòng nhắn tin riêng (Inbox) cho Bot để quản lý đồ đang săn!');
+        setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch(() => {}), 10000);
+        if (ctx.callbackQuery) ctx.answerCbQuery();
+        return;
+    }
+    
+    try {
+        const subs = await Subscription.find({ telegram_id: ctx.from.id.toString() });
+        if (subs.length === 0) {
+            ctx.reply('🛒 Bạn chưa đăng ký theo dõi món đồ nào cả.\nHãy dùng lệnh `/tim <từ khóa>` để bắt đầu săn đồ nhé!', { parse_mode: 'Markdown' });
+            if (ctx.callbackQuery) ctx.answerCbQuery();
+            return;
+        }
+
+        const keyboard = [];
+        for (const sub of subs) {
+            keyboard.push([{ text: `❌ Ngừng theo dõi: ${sub.keyword}`, callback_data: `delsub_${sub._id}` }]);
+        }
+
+        ctx.reply('📋 **Danh sách các món đồ bạn đang theo dõi:**\n(Bấm vào nút ❌ bên dưới để ngừng thông báo món đồ đó)', {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: keyboard
+            }
+        });
+    } catch (err) {
+        ctx.reply('Lỗi truy xuất danh sách.');
+    }
+    if (ctx.callbackQuery) ctx.answerCbQuery();
+};
+bot.command('quanly', handleQuanLy);
+bot.action('quanly_btn', handleQuanLy);
+
+bot.action(/delsub_(.+)/, async (ctx) => {
+    const subId = ctx.match[1];
+    try {
+        await Subscription.findByIdAndDelete(subId);
+        ctx.answerCbQuery('✅ Đã ngừng theo dõi thành công!', { show_alert: true });
+        
+        // Tải lại danh sách
+        const subs = await Subscription.find({ telegram_id: ctx.from.id.toString() });
+        if (subs.length === 0) {
+            await ctx.editMessageText('🛒 Bạn không còn theo dõi món đồ nào nữa.');
+        } else {
+            const keyboard = [];
+            for (const sub of subs) {
+                keyboard.push([{ text: `❌ Ngừng theo dõi: ${sub.keyword}`, callback_data: `delsub_${sub._id}` }]);
+            }
+            await ctx.editMessageReplyMarkup({ inline_keyboard: keyboard });
+        }
+    } catch (err) {
+        ctx.answerCbQuery('❌ Có lỗi xảy ra khi xóa.');
+    }
+});
+
 
 // --- XỬ LÝ NÚT TRUNG GIAN GIAO DỊCH ---
 bot.action(/escrow_(.+)/, async (ctx) => {
