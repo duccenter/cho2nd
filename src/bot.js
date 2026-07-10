@@ -559,14 +559,16 @@ bot.on('message', async (ctx) => {
         
         // 7.0 KỶ LUẬT SẢNH CHUNG (Không có topic id)
         if (!msg.message_thread_id) {
-            const adminUsernames = ['diticomsvn', 'diticoms_vn'];
-            if (!adminUsernames.includes(ctx.from.username)) {
-                try {
+            try {
+                const member = await ctx.telegram.getChatMember(ctx.chat.id, msg.from.id);
+                if (member.status !== 'creator' && member.status !== 'administrator') {
                     await ctx.deleteMessage(msg.message_id).catch(() => {});
-                    const warning = await ctx.reply(`⚠️ @${msg.from.username || msg.from.first_name}, Sảnh Chung chỉ dùng để nhận thông báo từ Bot. Vui lòng nhắn tin vào Topic **"1. Thảo Luận - Hỏi Đáp"**!`, { parse_mode: 'Markdown' });
+                    const warning = await ctx.reply(`⚠️ @${msg.from.username || msg.from.first_name}, Sảnh Chung chỉ dùng để nhận thông báo. Vui lòng nhắn tin vào Topic **"1. Thảo Luận - Hỏi Đáp"**!`, { parse_mode: 'Markdown' });
                     setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {}), 10000);
-                } catch (e) {}
-                return; // Dừng xử lý
+                    return; // Dừng xử lý
+                }
+            } catch (err) {
+                console.error('Lỗi kiểm tra quyền admin Sảnh Chung:', err);
             }
         }
 
