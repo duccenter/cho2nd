@@ -369,6 +369,24 @@ bot.command('check', async (ctx) => {
     }
 });
 
+// Lệnh testnews
+bot.command('testnews', async (ctx) => {
+    if (!['diticomsvn', 'diticoms_vn'].includes(ctx.from.username)) return;
+    
+    const news = require('./news');
+    ctx.reply('Đang lấy tin tức, vui lòng chờ...');
+    try {
+        const message = await news.getDailyNewsMessage();
+        if (message) {
+            ctx.reply(message, { parse_mode: 'Markdown', disable_web_page_preview: false });
+        } else {
+            ctx.reply('Không tìm thấy tin tức mới nào trong 24h qua.');
+        }
+    } catch (err) {
+        ctx.reply('Lỗi khi lấy tin tức: ' + err.message);
+    }
+});
+
 // Lệnh gettopicid
 bot.command('gettopicid', (ctx) => {
     if (ctx.message.is_topic_message && ctx.message.message_thread_id) {
