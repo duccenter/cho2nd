@@ -627,14 +627,8 @@ bot.on('message', async (ctx) => {
             const hasPrice = /\b(\d+[k|tr|triệu|đ|vnd]|\d{1,3}([\.\,]\d{3})+)\b/i.test(text);
             const hasPhone = /\b(0[3|5|7|8|9])+([0-9]{8})\b/.test(text);
 
-            if (!hasMedia || !hasPrice || !hasPhone) {
-                try {
-                    await ctx.deleteMessage(msg.message_id).catch(() => {});
-                    const warning = await ctx.reply(`🚫 @${msg.from.username || msg.from.first_name}, bài đăng BỊ XÓA do thiếu thông tin!\n\n**Yêu cầu bắt buộc:**\n1. Phải có Hình Ảnh hoặc Video\n2. Giá tiền (VD: 100k, 1.500.000đ)\n3. Số điện thoại (VD: 0987654321)\n\nVui lòng đăng lại cho đúng nhé!`);
-                    setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, warning.message_id).catch(() => {}), 15000);
-                } catch (err) {}
-            } else {
-                // HỢP LỆ -> Kiểm tra Anti-Flood
+            if (hasMedia && hasPrice && hasPhone) {
+                // HỢP LỆ -> Kiểm tra Anti-Flood và Kích hoạt Săn Đồ
                 try {
                     const user = await User.findOneAndUpdate(
                         { telegram_id: msg.from.id.toString() },
@@ -670,18 +664,6 @@ bot.on('message', async (ctx) => {
                             ).catch(() => {});
                         }
                     }
-
-                    const successMsg = await ctx.reply(`✅ Bài đăng của **${msg.from.first_name}** hợp lệ.\n\n🛡️ *Giao dịch an toàn: Nếu bạn thấy nghi ngờ, hãy gọi Admin đứng ra trung gian giữ tiền giúp bạn.*`, {
-                        reply_to_message_id: msg.message_id,
-                        parse_mode: 'Markdown',
-                        reply_markup: {
-                            inline_keyboard: [
-                                [{ text: '📞 Gọi Admin Trung Gian', callback_data: `escrow_${msg.from.id}` }]
-                            ]
-                        }
-                    });
-
-                    setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, successMsg.message_id).catch(() => {}), 20000);
 
                 } catch (err) {
                     console.error('Lỗi khi xử lý bài hợp lệ:', err);
