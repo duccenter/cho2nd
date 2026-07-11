@@ -230,15 +230,6 @@ bot.action(/delsub_(.+)/, async (ctx) => {
 });
 
 
-// --- XỬ LÝ NÚT TRUNG GIAN GIAO DỊCH ---
-bot.action(/escrow_(.+)/, async (ctx) => {
-    const sellerId = ctx.match[1];
-    const buyer = ctx.from;
-    const adminUsername = 'diticoms_vn'; // Username Admin được cấu hình cứng
-
-    await ctx.reply(`🔔 **YÊU CẦU TRUNG GIAN GIAO DỊCH**\n\nNgười mua: [${buyer.first_name}](tg://user?id=${buyer.id})\nNgười bán: [Seller](tg://user?id=${sellerId})\nAdmin hỗ trợ: @${adminUsername}\n\nXin mời Admin @${adminUsername} tạo nhóm riêng với 2 bạn này để tiến hành giao dịch an toàn!`, { parse_mode: 'Markdown' });
-    await ctx.answerCbQuery('Đã gửi yêu cầu gọi Admin!');
-});
 
 // --- 2. TÍNH NĂNG ĐÃ BÁN (GIỮ LẠI BÀI) ---
 bot.command('daban', async (ctx) => {
@@ -655,8 +646,9 @@ bot.on('message', async (ctx) => {
                     await user.save();
 
                     const subs = await Subscription.find();
+                    const textLower = text.toLowerCase();
                     for (const sub of subs) {
-                        if (text.includes(sub.keyword) && sub.telegram_id !== msg.from.id.toString()) {
+                        if (textLower.includes(sub.keyword) && sub.telegram_id !== msg.from.id.toString()) {
                             ctx.telegram.sendMessage(
                                 sub.telegram_id, 
                                 `🔔 **Hàng mới về!**\nCó người vừa đăng bán mặt hàng liên quan tới từ khóa: **${sub.keyword}**\n\nNội dung:\n"${text.substring(0, 50)}..."\n\n(Vào nhóm để xem chi tiết nhé!)`,
