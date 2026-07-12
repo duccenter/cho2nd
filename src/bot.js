@@ -371,7 +371,18 @@ bot.command('check', async (ctx) => {
 
 // Lệnh testnews
 bot.command('testnews', async (ctx) => {
-    if (!['diticomsvn', 'diticoms_vn'].includes(ctx.from.username)) return;
+    if (ctx.chat.type === 'private') {
+        return ctx.reply('Lệnh này chỉ dùng được trong nhóm để tự động nhận diện quyền Admin.');
+    }
+    
+    try {
+        const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
+        if (member.status !== 'creator' && member.status !== 'administrator') {
+            return;
+        }
+    } catch (e) {
+        return;
+    }
     
     const news = require('./news');
     ctx.reply('Đang lấy tin tức, vui lòng chờ...');
