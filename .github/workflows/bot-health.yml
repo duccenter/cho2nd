@@ -1,0 +1,48 @@
+name: Bot health watchdog
+
+on:
+  schedule:
+    # Away from the top of the hour, when GitHub schedules are busiest.
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bot-health.yml'
+
+permissions: {}
+
+concurrency:
+  group: bot-health-watchdog
+  cancel-in-progress: false
+
+jobs:
+  health:
+    # Scheduled requests should remain free if repository visibility changes.
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Wake Render and verify bot and MongoDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          for attempt in 1 2 3; do
+            if curl --fail --silent --show-error \
+              --connect-timeout 10 --max-time 90 \
+              --output "$response_file" \
+              https://cho2nd-bot.onrender.com/health \
+              && jq -e '.status == "ok" and .bot == "webhook" and .database == "connected"' \
+                "$response_file" >/dev/null; then
+              echo 'Bot webhook and MongoDB are healthy.'
+              echo 'Bot webhook and MongoDB are healthy.' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::warning::Health check attempt ${attempt}/3 failed."
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
+          done
+          echo '::error::Bot health check failed after three attempts. Check Render and MongoDB.'
+          echo 'Bot unavailable after three attempts. Check Render logs and MongoDB Atlas.' >> "$GITHUB_STEP_SUMMARY"
+          exit 1

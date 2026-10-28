@@ -34,6 +34,18 @@ chỉ thêm các dải IP cần thiết, không tự mở truy cập toàn Inter
 
 Gói Render Free có thể ngủ khi không có truy cập. Telegram sẽ đánh thức dịch vụ
 bằng webhook, nhưng phản hồi đầu tiên có thể chậm trong lúc khởi động lại.
+
+Workflow `.github/workflows/bot-health.yml` gọi `/health` mỗi 5 phút từ GitHub,
+cho phép khởi động nguội tối đa 90 giây mỗi lần và thử lại 3 lần. Chỉ thành công
+khi webhook và MongoDB đều sẵn sàng. Lỗi được đánh dấu trong GitHub Actions;
+thông báo phụ thuộc cài đặt thông báo Actions của tài khoản.
+Workflow không cần token hoặc URI database, không gửi tin vào nhóm Telegram.
+Nó chỉ chạy trên repository công khai để tránh chi phí runner khi đổi sang private.
+Lịch chỉ có hiệu lực khi workflow đã ở nhánh mặc định `main`; có thể thử bằng Run workflow.
+GitHub có thể trễ/bỏ lượt chạy và tự tắt lịch của repository công khai sau 60 ngày
+không có hoạt động. Đây là cơ chế giảm ngủ và phát hiện lỗi, không bảo đảm uptime 100%.
+Render Free còn giới hạn 750 giờ chạy/tháng dùng chung workspace và có thể tự restart.
+
 Cron trong tiến trình chỉ chạy khi dịch vụ đang thức. Để gửi tin đúng 10h,
 cấu hình bộ lập lịch bên ngoài gọi `GET /cron/news` với header
 `Authorization: Bearer <CRON_SECRET>` lúc 10:00, múi giờ `Asia/Ho_Chi_Minh`.
