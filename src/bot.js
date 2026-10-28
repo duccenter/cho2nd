@@ -1,5 +1,6 @@
 const { Telegraf, Markup } = require('telegraf');
 const { User, Subscription, Scammer } = require('./database');
+const { describeError } = require('./errors');
 
 if (!process.env.BOT_TOKEN) {
     console.error('Lỗi: BOT_TOKEN không được tìm thấy trong biến môi trường.');
@@ -8,6 +9,15 @@ if (!process.env.BOT_TOKEN) {
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const BAD_WORDS = ['đm', 'vcl', 'địt', 'lồn', 'cặc', 'phò', 'đĩ', 'chó đẻ'];
+
+async function restoreMemberPermissions(telegram, chatId, userId) {
+    const chat = await telegram.getChat(chatId);
+    if (!chat.permissions) throw new Error('Không đọc được quyền mặc định của nhóm.');
+    await telegram.restrictChatMember(chatId, userId, {
+        permissions: chat.permissions,
+        use_independent_chat_permissions: true
+    });
+}
 
 // --- 1. MENU & START ---
 bot.command(['start', 'help', 'menu'], async (ctx) => {
@@ -22,7 +32,7 @@ bot.command(['start', 'help', 'menu'], async (ctx) => {
         return;
     }
 
-    ctx.reply(
+    await ctx.reply(
         'Chào mừng đến với hệ thống Quản lý Chợ 2nd! Bạn cần giúp gì?',
         Markup.inlineKeyboard([
             [Markup.button.callback('👕 Hướng dẫn Đăng bài', 'huong_dan')],
@@ -35,17 +45,17 @@ bot.command(['start', 'help', 'menu'], async (ctx) => {
     );
 });
 
-bot.action('huong_dan', (ctx) => {
-    ctx.reply('📌 **Hướng dẫn đăng bài:**\nTrong phòng Mua Bán, mọi bài viết BẮT BUỘC phải có **Hình Ảnh/Video**, **Giá tiền** và **Số điện thoại**.\nNếu bán xong, hãy Reply bài viết của chính bạn và gõ `/daban` để đóng dấu nhé!', { parse_mode: 'Markdown' });
-    ctx.answerCbQuery();
+bot.action('huong_dan', async (ctx) => {
+    await ctx.reply('📌 **Hướng dẫn đăng bài:**\nTrong phòng Mua Bán, mọi bài viết BẮT BUỘC phải có **Hình Ảnh/Video**, **Giá tiền** và **Số điện thoại**.\nNếu bán xong, hãy Reply bài viết của chính bạn và gõ `/daban` để đóng dấu nhé!', { parse_mode: 'Markdown' });
+    await ctx.answerCbQuery();
 });
-bot.action('san_do', (ctx) => {
-    ctx.reply('🔔 **Cách săn đồ:**\nĐể nhận thông báo khi có người bán món đồ bạn cần, hãy nhắn tin riêng (Inbox) cho tôi với cú pháp:\n`/tim <từ khóa>`\nVí dụ: `/tim iphone 13`', { parse_mode: 'Markdown' });
-    ctx.answerCbQuery();
+bot.action('san_do', async (ctx) => {
+    await ctx.reply('🔔 **Cách săn đồ:**\nĐể nhận thông báo khi có người bán món đồ bạn cần, hãy nhắn tin riêng (Inbox) cho tôi với cú pháp:\n`/tim <từ khóa>`\nVí dụ: `/tim iphone 13`', { parse_mode: 'Markdown' });
+    await ctx.answerCbQuery();
 });
-bot.action('uy_tin', (ctx) => {
-    ctx.reply('⭐ **Hệ thống Uy tín:**\n- Để cộng điểm uy tín cho người bán: Hãy Reply tin nhắn của họ và gõ `/uytin`\n- Để tra cứu SĐT hoặc Username có lừa đảo không: Gõ `/check <sdt/username>`', { parse_mode: 'Markdown' });
-    ctx.answerCbQuery();
+bot.action('uy_tin', async (ctx) => {
+    await ctx.reply('⭐ **Hệ thống Uy tín:**\n- Để cộng điểm uy tín cho người bán: Hãy Reply tin nhắn của họ và gõ `/uytin`\n- Để tra cứu SĐT hoặc Username có lừa đảo không: Gõ `/check <sdt/username>`', { parse_mode: 'Markdown' });
+    await ctx.answerCbQuery();
 });
 
 bot.action('tao_link', async (ctx) => {
@@ -67,9 +77,9 @@ bot.action('tao_link', async (ctx) => {
         await ctx.reply(`🎉 **Đây là Link Giới Thiệu Độc Quyền của bạn:**\n\n${inviteLink.invite_link}\n\nKhi có người tham gia nhóm thông qua link này, bạn sẽ được:\n- Cộng 2 Điểm Uy Tín\n- Phong tước hiệu Admin danh dự nếu đạt mốc 3, 10, 50 người!`, { parse_mode: 'Markdown' });
     } catch (err) {
         console.error('Lỗi tạo link:', err);
-        ctx.reply('❌ Có lỗi xảy ra. Vui lòng đảm bảo Bot là Admin của nhóm và có quyền "Invite Users" (Thêm thành viên).');
+        await ctx.reply('❌ Có lỗi xảy ra. Vui lòng đảm bảo Bot là Admin của nhóm và có quyền "Invite Users" (Thêm thành viên).');
     }
-    ctx.answerCbQuery();
+    await ctx.answerCbQuery();
 });
 
 // --- XỬ LÝ MỞ KHÓA CHAT ---
@@ -91,20 +101,12 @@ bot.action('mo_khoa', async (ctx) => {
         }
 
         // Mở khóa
-        await ctx.telegram.restrictChatMember(chatId, ctx.from.id, {
-            permissions: {
-                can_send_messages: true, can_send_audios: true, can_send_documents: true,
-                can_send_photos: true, can_send_videos: true, can_send_video_notes: true,
-                can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true,
-                can_add_web_page_previews: true, can_change_info: true, can_invite_users: true,
-                can_pin_messages: true, can_manage_topics: true
-            }
-        });
-        ctx.reply('✅ **MỞ KHÓA THÀNH CÔNG!**\n\nBạn đã có thể nhắn tin và đăng bài trong nhóm Chợ 2nd. Chúc bạn mua may bán đắt!', { parse_mode: 'Markdown' });
+        await restoreMemberPermissions(ctx.telegram, chatId, ctx.from.id);
+        await ctx.reply('✅ **MỞ KHÓA THÀNH CÔNG!**\n\nBạn đã có thể nhắn tin và đăng bài trong nhóm Chợ 2nd. Chúc bạn mua may bán đắt!', { parse_mode: 'Markdown' });
     } catch (err) {
-        ctx.reply('❌ Có lỗi xảy ra, Bot không đủ quyền hạn hoặc bạn không ở trong nhóm.');
+        await ctx.reply('❌ Có lỗi xảy ra, Bot không đủ quyền hạn hoặc bạn không ở trong nhóm.');
     }
-    ctx.answerCbQuery();
+    await ctx.answerCbQuery();
 });
 
 // --- XỬ LÝ TRỢ LÝ LÊN FORM ---
@@ -118,11 +120,11 @@ bot.action('tao_form', async (ctx) => {
             { $set: { post_builder_state: 'waiting_name', post_draft: {} } },
             { upsert: true }
         );
-        ctx.reply('Bắt đầu lên form bài viết! \n\n1️⃣ **Bạn đang bán sản phẩm gì?** (Ví dụ: iPhone 13 Pro Max)\n*(Gõ /cancel bất cứ lúc nào để thoát)*', { parse_mode: 'Markdown' });
+        await ctx.reply('Bắt đầu lên form bài viết! \n\n1️⃣ **Bạn đang bán sản phẩm gì?** (Ví dụ: iPhone 13 Pro Max)\n*(Gõ /cancel bất cứ lúc nào để thoát)*', { parse_mode: 'Markdown' });
     } catch (err) {
-        ctx.reply('Lỗi hệ thống.');
+        await ctx.reply('Lỗi hệ thống.');
     }
-    ctx.answerCbQuery();
+    await ctx.answerCbQuery();
 });
 
 bot.command('cancel', async (ctx) => {
@@ -132,7 +134,7 @@ bot.command('cancel', async (ctx) => {
                 { telegram_id: ctx.from.id.toString() },
                 { $set: { post_builder_state: 'none', post_draft: {} } }
             );
-            ctx.reply('Đã hủy quá trình tạo form bài viết.');
+            await ctx.reply('Đã hủy quá trình tạo form bài viết.');
         } catch (err) {}
     }
 });
@@ -162,11 +164,11 @@ const handleProfile = async (ctx) => {
             `📅 **Gia nhập:** ${joinedDate}\n\n` +
             `*(Giao dịch uy tín và mời thêm bạn bè để nâng cấp tước hiệu nhé!)*`;
 
-        ctx.reply(profileText, { parse_mode: 'Markdown' });
+        await ctx.reply(profileText, { parse_mode: 'Markdown' });
     } catch (err) {
-        ctx.reply('Lỗi truy xuất hồ sơ.');
+        await ctx.reply('Lỗi truy xuất hồ sơ.');
     }
-    if (ctx.callbackQuery) ctx.answerCbQuery();
+    if (ctx.callbackQuery) await ctx.answerCbQuery();
 };
 bot.command('profile', handleProfile);
 bot.action('profile_btn', handleProfile);
@@ -176,15 +178,15 @@ const handleQuanLy = async (ctx) => {
     if (ctx.chat && ctx.chat.type !== 'private') {
         const msg = await ctx.reply('⚠️ Vui lòng nhắn tin riêng (Inbox) cho Bot để quản lý đồ đang săn!');
         setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch(() => {}), 10000);
-        if (ctx.callbackQuery) ctx.answerCbQuery();
+        if (ctx.callbackQuery) await ctx.answerCbQuery();
         return;
     }
     
     try {
         const subs = await Subscription.find({ telegram_id: ctx.from.id.toString() });
         if (subs.length === 0) {
-            ctx.reply('🛒 Bạn chưa đăng ký theo dõi món đồ nào cả.\nHãy dùng lệnh `/tim <từ khóa>` để bắt đầu săn đồ nhé!', { parse_mode: 'Markdown' });
-            if (ctx.callbackQuery) ctx.answerCbQuery();
+            await ctx.reply('🛒 Bạn chưa đăng ký theo dõi món đồ nào cả.\nHãy dùng lệnh `/tim <từ khóa>` để bắt đầu săn đồ nhé!', { parse_mode: 'Markdown' });
+            if (ctx.callbackQuery) await ctx.answerCbQuery();
             return;
         }
 
@@ -193,16 +195,16 @@ const handleQuanLy = async (ctx) => {
             keyboard.push([{ text: `❌ Ngừng theo dõi: ${sub.keyword}`, callback_data: `delsub_${sub._id}` }]);
         }
 
-        ctx.reply('📋 **Danh sách các món đồ bạn đang theo dõi:**\n(Bấm vào nút ❌ bên dưới để ngừng thông báo món đồ đó)', {
+        await ctx.reply('📋 **Danh sách các món đồ bạn đang theo dõi:**\n(Bấm vào nút ❌ bên dưới để ngừng thông báo món đồ đó)', {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: keyboard
             }
         });
     } catch (err) {
-        ctx.reply('Lỗi truy xuất danh sách.');
+        await ctx.reply('Lỗi truy xuất danh sách.');
     }
-    if (ctx.callbackQuery) ctx.answerCbQuery();
+    if (ctx.callbackQuery) await ctx.answerCbQuery();
 };
 bot.command('quanly', handleQuanLy);
 bot.action('quanly_btn', handleQuanLy);
@@ -211,7 +213,7 @@ bot.action(/delsub_(.+)/, async (ctx) => {
     const subId = ctx.match[1];
     try {
         await Subscription.findByIdAndDelete(subId);
-        ctx.answerCbQuery('✅ Đã ngừng theo dõi thành công!', { show_alert: true });
+        await ctx.answerCbQuery('✅ Đã ngừng theo dõi thành công!', { show_alert: true });
         
         // Tải lại danh sách
         const subs = await Subscription.find({ telegram_id: ctx.from.id.toString() });
@@ -225,7 +227,7 @@ bot.action(/delsub_(.+)/, async (ctx) => {
             await ctx.editMessageReplyMarkup({ inline_keyboard: keyboard });
         }
     } catch (err) {
-        ctx.answerCbQuery('❌ Có lỗi xảy ra khi xóa.');
+        await ctx.answerCbQuery('❌ Có lỗi xảy ra khi xóa.');
     }
 });
 
@@ -263,9 +265,9 @@ bot.command('tim', async (ctx) => {
     }
     try {
         await Subscription.create({ telegram_id: ctx.message.from.id.toString(), keyword: keyword });
-        ctx.reply(`✅ Đã đăng ký nhận thông báo khi có người bán: **${keyword}**`, { parse_mode: 'Markdown' });
+        await ctx.reply(`✅ Đã đăng ký nhận thông báo khi có người bán: **${keyword}**`, { parse_mode: 'Markdown' });
     } catch (err) {
-        ctx.reply('Lỗi kết nối cơ sở dữ liệu. Hãy kiểm tra biến môi trường MONGO_URI.');
+        await ctx.reply('Lỗi kết nối cơ sở dữ liệu. Hãy kiểm tra biến môi trường MONGO_URI.');
     }
 });
 
@@ -288,9 +290,9 @@ bot.command('uytin', async (ctx) => {
             },
             { upsert: true, new: true }
         );
-        ctx.reply(`⭐ Tuyệt vời! Bạn đã cộng 1 điểm uy tín cho **${repliedMsg.from.first_name}**. (Điểm hiện tại: ${targetUser.trust_score})`, { parse_mode: 'Markdown' });
+        await ctx.reply(`⭐ Tuyệt vời! Bạn đã cộng 1 điểm uy tín cho **${repliedMsg.from.first_name}**. (Điểm hiện tại: ${targetUser.trust_score})`, { parse_mode: 'Markdown' });
     } catch (err) {
-        ctx.reply('Lỗi kết nối cơ sở dữ liệu MongoDB.');
+        await ctx.reply('Lỗi kết nối cơ sở dữ liệu MongoDB.');
     }
 });
 
@@ -310,12 +312,12 @@ bot.command('scam', async (ctx) => {
     
     try {
         await Scammer.create({ target: target, reason: reason, added_by: ctx.from.username });
-        ctx.reply(`🚨 **ĐÃ ĐƯA VÀO SỔ ĐEN:** \`${target}\`\nLý do: ${reason}`, { parse_mode: 'Markdown' });
+        await ctx.reply(`🚨 **ĐÃ ĐƯA VÀO SỔ ĐEN:** \`${target}\`\nLý do: ${reason}`, { parse_mode: 'Markdown' });
     } catch (err) {
         if (err.code === 11000) {
-            ctx.reply(`⚠️ Mục tiêu \`${target}\` đã có sẵn trong Sổ Đen rồi!`, { parse_mode: 'Markdown' });
+            await ctx.reply(`⚠️ Mục tiêu \`${target}\` đã có sẵn trong Sổ Đen rồi!`, { parse_mode: 'Markdown' });
         } else {
-            ctx.reply('Lỗi cơ sở dữ liệu.');
+            await ctx.reply('Lỗi cơ sở dữ liệu.');
         }
     }
 });
@@ -339,9 +341,9 @@ bot.command('testpromote', async (ctx) => {
             can_promote_members: false
         });
         await ctx.telegram.setChatAdministratorCustomTitle(ctx.chat.id, ctx.from.id, "Ông Trùm Chợ 2nd");
-        ctx.reply('👑 Đã hack thành công! Bạn vừa được thăng cấp lên hạng cao nhất: **Ông Trùm Chợ 2nd** (Kèm 100 Điểm Uy Tín)!', { parse_mode: 'Markdown' });
+        await ctx.reply('👑 Đã hack thành công! Bạn vừa được thăng cấp lên hạng cao nhất: **Ông Trùm Chợ 2nd** (Kèm 100 Điểm Uy Tín)!', { parse_mode: 'Markdown' });
     } catch (err) {
-        ctx.reply('Lỗi (Có thể Bot chưa đủ quyền Admin để trao danh hiệu): ' + err.message);
+        await ctx.reply('Lỗi (Có thể Bot chưa đủ quyền Admin để trao danh hiệu): ' + err.message);
     }
 });
 
@@ -363,9 +365,9 @@ bot.command('check', async (ctx) => {
         if (!user) {
             return ctx.reply(`Chưa có dữ liệu uy tín nào về ${cleanTarget} trên hệ thống.`);
         }
-        ctx.reply(`⭐ Người dùng **@${cleanTarget}** hiện có **${user.trust_score}** điểm uy tín trên hệ thống!`, { parse_mode: 'Markdown' });
+        await ctx.reply(`⭐ Người dùng **@${cleanTarget}** hiện có **${user.trust_score}** điểm uy tín trên hệ thống!`, { parse_mode: 'Markdown' });
     } catch (err) {
-        ctx.reply('Lỗi kết nối cơ sở dữ liệu.');
+        await ctx.reply('Lỗi kết nối cơ sở dữ liệu.');
     }
 });
 
@@ -385,25 +387,25 @@ bot.command('testnews', async (ctx) => {
     }
     
     const news = require('./news');
-    ctx.reply('Đang lấy tin tức, vui lòng chờ...');
+    await ctx.reply('Đang lấy tin tức, vui lòng chờ...');
     try {
         const message = await news.getDailyNewsMessage();
         if (message) {
-            ctx.reply(message, { parse_mode: 'Markdown', disable_web_page_preview: false });
+            await ctx.reply(message, { parse_mode: 'Markdown', disable_web_page_preview: false });
         } else {
-            ctx.reply('Không tìm thấy tin tức mới nào trong 24h qua.');
+            await ctx.reply('Không tìm thấy tin tức mới nào trong 24h qua.');
         }
     } catch (err) {
-        ctx.reply('Lỗi khi lấy tin tức: ' + err.message);
+        await ctx.reply('Lỗi khi lấy tin tức: ' + err.message);
     }
 });
 
 // Lệnh gettopicid
-bot.command('gettopicid', (ctx) => {
+bot.command('gettopicid', async (ctx) => {
     if (ctx.message.is_topic_message && ctx.message.message_thread_id) {
-        ctx.reply(`📌 **Thông số:**\n1. MUABAN_TOPIC_ID (của phòng này): \`${ctx.message.message_thread_id}\`\n2. GROUP_CHAT_ID: \`${ctx.chat.id}\`\n\n*(Lưu ý: Nếu có nhiều phòng, hãy ghép các số ID phòng thành 1 chuỗi ngăn cách bằng dấu phẩy, ví dụ: 336,333,330,2)*`, { parse_mode: 'Markdown' });
+        await ctx.reply(`📌 **Thông số:**\n1. MUABAN_TOPIC_ID (của phòng này): \`${ctx.message.message_thread_id}\`\n2. GROUP_CHAT_ID: \`${ctx.chat.id}\`\n\n*(Lưu ý: Nếu có nhiều phòng, hãy ghép các số ID phòng thành 1 chuỗi ngăn cách bằng dấu phẩy, ví dụ: 336,333,330,2)*`, { parse_mode: 'Markdown' });
     } else {
-        ctx.reply('Lệnh này chỉ dùng được bên trong một Topic.');
+        await ctx.reply('Lệnh này chỉ dùng được bên trong một Topic.');
     }
 });
 
@@ -415,11 +417,21 @@ bot.on('new_chat_members', async (ctx) => {
         const name = member.first_name || member.username || 'Thành viên mới';
         
         try {
+            if (process.env.ENABLE_JOIN_CAPTCHA !== 'true') {
+                // Không truyền thread ID để lời chào luôn gửi vào Sảnh Chung.
+                await ctx.telegram.sendMessage(
+                    ctx.chat.id,
+                    `👋 Chào mừng ${name} đến với Chợ 2nd!\n\n📌 Sảnh Chung dành cho thông báo. Hãy vào Topic Thảo Luận - Hỏi Đáp để trò chuyện hoặc chọn Topic mua bán phù hợp để đăng bài.\n\n🤝 Chúc bạn giao lưu vui vẻ, mua may bán đắt!`
+                );
+                continue;
+            }
+
             await ctx.telegram.restrictChatMember(ctx.chat.id, member.id, {
                 permissions: { can_send_messages: false }
             });
 
-            const captchaMsg = await ctx.reply(
+            const captchaMsg = await ctx.telegram.sendMessage(
+                ctx.chat.id,
                 `👋 Chào mừng **${name}** đã tham gia Chợ 2nd!\n\n⚠️ Để bảo vệ nhóm khỏi Bot tự động, vui lòng bấm nút bên dưới để mở khóa chat! (Tin nhắn tự hủy sau 2 phút)`,
                 {
                     parse_mode: 'Markdown',
@@ -436,7 +448,7 @@ bot.on('new_chat_members', async (ctx) => {
                 ctx.telegram.deleteMessage(ctx.chat.id, captchaMsg.message_id).catch(() => {});
             }, 120000);
         } catch (err) {
-            console.error('Lỗi khi xử lý Captcha:', err);
+            console.error('Lỗi khi chào đón thành viên mới:', describeError(err));
         }
     }
 });
@@ -448,20 +460,12 @@ bot.action(/captcha_(.+)/, async (ctx) => {
     }
 
     try {
-        await ctx.telegram.restrictChatMember(ctx.chat.id, parseInt(targetId), {
-            permissions: {
-                can_send_messages: true, can_send_audios: true, can_send_documents: true,
-                can_send_photos: true, can_send_videos: true, can_send_video_notes: true,
-                can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true,
-                can_add_web_page_previews: true, can_change_info: true, can_invite_users: true,
-                can_pin_messages: true, can_manage_topics: true
-            }
-        });
+        await restoreMemberPermissions(ctx.telegram, ctx.chat.id, parseInt(targetId));
         
-        ctx.answerCbQuery('✅ Xác thực thành công! Bạn đã có thể chat.');
+        await ctx.answerCbQuery('✅ Xác thực thành công! Bạn đã có thể chat.');
         await ctx.deleteMessage();
     } catch (err) {
-        ctx.answerCbQuery('❌ Lỗi mở khóa.');
+        await ctx.answerCbQuery('❌ Lỗi mở khóa.');
     }
 });
 
@@ -695,7 +699,7 @@ bot.on('message', async (ctx) => {
 });
 
 bot.catch((err, ctx) => {
-    console.error(`Có lỗi xảy ra:`, err);
+    console.error('Có lỗi xảy ra khi xử lý Telegram:', describeError(err));
 });
 
 module.exports = bot;
