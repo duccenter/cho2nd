@@ -421,7 +421,7 @@ bot.on('new_chat_members', async (ctx) => {
                 // Không truyền thread ID để lời chào luôn gửi vào Sảnh Chung.
                 await ctx.telegram.sendMessage(
                     ctx.chat.id,
-                    `👋 Chào mừng ${name} đến với Chợ 2nd!\n\n💬 Bạn có thể nhắn tin ngay, không cần bấm xác nhận.\n📌 Sảnh Chung dành cho thông báo. Hãy vào Topic Thảo Luận - Hỏi Đáp để trò chuyện hoặc chọn Topic mua bán phù hợp để đăng bài.\n\n🤝 Chúc bạn giao lưu vui vẻ, mua may bán đắt!`
+                    `👋 Chào mừng ${name} đến với Chợ 2nd!\n\n📌 Sảnh Chung dành cho thông báo. Hãy vào Topic Thảo Luận - Hỏi Đáp để trò chuyện hoặc chọn Topic mua bán phù hợp để đăng bài.\n\n🤝 Chúc bạn giao lưu vui vẻ, mua may bán đắt!`
                 );
                 continue;
             }

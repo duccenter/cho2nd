@@ -50,7 +50,7 @@ for (const env of [{}, { ENABLE_JOIN_CAPTCHA: 'false' }]) {
         assert.equal(sent[0][0], -1001);
         assert.match(sent[0][1], /An_\[test\]/);
         assert.match(sent[1][1], /Binh/);
-        assert.match(sent[0][1], /không cần bấm xác nhận/);
+        assert.match(sent[0][1], /Sảnh Chung dành cho thông báo/);
         assert.equal(sent[0].length, 2, 'no thread ID, Markdown parsing or verification buttons');
     });
 }
