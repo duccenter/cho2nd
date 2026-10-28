@@ -10,6 +10,15 @@ if (!process.env.BOT_TOKEN) {
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const BAD_WORDS = ['đm', 'vcl', 'địt', 'lồn', 'cặc', 'phò', 'đĩ', 'chó đẻ'];
 
+async function restoreMemberPermissions(telegram, chatId, userId) {
+    const chat = await telegram.getChat(chatId);
+    if (!chat.permissions) throw new Error('Không đọc được quyền mặc định của nhóm.');
+    await telegram.restrictChatMember(chatId, userId, {
+        permissions: chat.permissions,
+        use_independent_chat_permissions: true
+    });
+}
+
 // --- 1. MENU & START ---
 bot.command(['start', 'help', 'menu'], async (ctx) => {
     if (ctx.chat && ctx.chat.type !== 'private') {
@@ -92,15 +101,7 @@ bot.action('mo_khoa', async (ctx) => {
         }
 
         // Mở khóa
-        await ctx.telegram.restrictChatMember(chatId, ctx.from.id, {
-            permissions: {
-                can_send_messages: true, can_send_audios: true, can_send_documents: true,
-                can_send_photos: true, can_send_videos: true, can_send_video_notes: true,
-                can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true,
-                can_add_web_page_previews: true, can_change_info: true, can_invite_users: true,
-                can_pin_messages: true, can_manage_topics: true
-            }
-        });
+        await restoreMemberPermissions(ctx.telegram, chatId, ctx.from.id);
         await ctx.reply('✅ **MỞ KHÓA THÀNH CÔNG!**\n\nBạn đã có thể nhắn tin và đăng bài trong nhóm Chợ 2nd. Chúc bạn mua may bán đắt!', { parse_mode: 'Markdown' });
     } catch (err) {
         await ctx.reply('❌ Có lỗi xảy ra, Bot không đủ quyền hạn hoặc bạn không ở trong nhóm.');
@@ -410,6 +411,8 @@ bot.command('gettopicid', async (ctx) => {
 
 // --- CHÀO MỪNG & CAPTCHA NGƯỜI MỚI ---
 bot.on('new_chat_members', async (ctx) => {
+    // Mặc định cho phép thành viên mới gửi tin theo quyền của nhóm.
+    if (process.env.ENABLE_JOIN_CAPTCHA !== 'true') return;
     const newMembers = ctx.message.new_chat_members;
     for (const member of newMembers) {
         if (member.is_bot) continue;
@@ -449,15 +452,7 @@ bot.action(/captcha_(.+)/, async (ctx) => {
     }
 
     try {
-        await ctx.telegram.restrictChatMember(ctx.chat.id, parseInt(targetId), {
-            permissions: {
-                can_send_messages: true, can_send_audios: true, can_send_documents: true,
-                can_send_photos: true, can_send_videos: true, can_send_video_notes: true,
-                can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true,
-                can_add_web_page_previews: true, can_change_info: true, can_invite_users: true,
-                can_pin_messages: true, can_manage_topics: true
-            }
-        });
+        await restoreMemberPermissions(ctx.telegram, ctx.chat.id, parseInt(targetId));
         
         await ctx.answerCbQuery('✅ Xác thực thành công! Bạn đã có thể chat.');
         await ctx.deleteMessage();

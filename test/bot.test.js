@@ -4,13 +4,14 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { describeError } = require('../src/errors');
 
-function loadHandlers() {
+function loadHandlers(env = {}) {
     const commands = new Map();
     const actions = new Map();
+    const events = new Map();
     class TestBot {
         command(names, handler) { for (const name of [names].flat()) commands.set(name, handler); }
         action(name, handler) { actions.set(name, handler); }
-        on() {}
+        on(name, handler) { events.set(name, handler); }
         catch() {}
     }
     const db = { User: { findOneAndUpdate: async () => ({ trust_score: 1 }) } };
@@ -21,11 +22,35 @@ function loadHandlers() {
             if (name === './database') return db;
             throw new Error(`Unexpected require: ${name}`);
         },
-        process: { env: { BOT_TOKEN: '123:offline-test' } },
+        process: { env: { BOT_TOKEN: '123:offline-test', ...env } },
         module: { exports: {} }, console, setTimeout
     });
-    return { commands, actions };
+    return { commands, actions, events };
 }
+
+test('new members are not muted by default', async () => {
+    const { events } = loadHandlers();
+    await events.get('new_chat_members')({});
+});
+
+test('unlock restores group defaults without granting topic management', async () => {
+    const { actions } = loadHandlers({ GROUP_CHAT_ID: '-1001' });
+    const permissions = { can_send_messages: true, can_send_photos: true, can_manage_topics: false, can_pin_messages: false, can_change_info: false };
+    let restored;
+    await actions.get('mo_khoa')({
+        chat: { type: 'private' }, from: { id: 42 },
+        telegram: {
+            getChatMember: async () => ({ status: 'restricted', until_date: 0 }),
+            getChat: async () => ({ permissions }),
+            restrictChatMember: async (chatId, userId, options) => { restored = { chatId, userId, options }; }
+        },
+        reply: async () => {}, answerCbQuery: async () => {}
+    });
+    assert.equal(restored.chatId, '-1001');
+    assert.equal(restored.userId, 42);
+    assert.equal(restored.options.permissions, permissions);
+    assert.equal(restored.options.use_independent_chat_permissions, true);
+});
 
 test('failed reputation replies remain in the handler promise', async () => {
     const { commands } = loadHandlers();

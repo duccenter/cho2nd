@@ -18,6 +18,7 @@ Có thể dùng Blueprint `render.yaml` để điền sẵn cấu hình dịch v
 | `MONGO_URI` | URI MongoDB có tên database, ví dụ `cho2nd`; bắt buộc. |
 | `GROUP_CHAT_ID` | ID nhóm đích, thường bắt đầu bằng `-100`. |
 | `MUABAN_TOPIC_IDS` | Danh sách ID topic mua bán, ngăn cách bằng dấu phẩy. |
+| `ENABLE_JOIN_CAPTCHA` | Mặc định `false`: người mới được gửi tin theo quyền nhóm. Đặt `true` để yêu cầu bấm xác minh. Mở khóa chỉ khôi phục quyền mặc định của nhóm. |
 | `NEWS_TOPIC_ID` | Topic nhận bản tin; để trống để gửi vào sảnh chung. |
 | `CRON_SECRET` | Chuỗi bí mật bảo vệ API gửi bản tin. |
 | `NODE_VERSION` | `22` trên Render. |
