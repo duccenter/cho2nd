@@ -10,6 +10,19 @@ if (!process.env.BOT_TOKEN) {
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const BAD_WORDS = ['đm', 'vcl', 'địt', 'lồn', 'cặc', 'phò', 'đĩ', 'chó đẻ'];
 
+async function canManageBot(ctx) {
+    const allowedIds = (process.env.ADMIN_USER_IDS || '').split(',').map(id => id.trim());
+    const chatId = process.env.GROUP_CHAT_ID;
+    if (!chatId || !allowedIds.includes(String(ctx.from.id))) return false;
+    if (ctx.chat.type !== 'private' && String(ctx.chat.id) !== String(chatId)) return false;
+    try {
+        const member = await ctx.telegram.getChatMember(chatId, ctx.from.id);
+        return member.status === 'creator' || member.status === 'administrator';
+    } catch {
+        return false;
+    }
+}
+
 async function restoreMemberPermissions(telegram, chatId, userId) {
     const chat = await telegram.getChat(chatId);
     if (!chat.permissions) throw new Error('Không đọc được quyền mặc định của nhóm.');
@@ -74,7 +87,7 @@ bot.action('tao_link', async (ctx) => {
             creates_join_request: false
         });
         
-        await ctx.reply(`🎉 **Đây là Link Giới Thiệu Độc Quyền của bạn:**\n\n${inviteLink.invite_link}\n\nKhi có người tham gia nhóm thông qua link này, bạn sẽ được:\n- Cộng 2 Điểm Uy Tín\n- Phong tước hiệu Admin danh dự nếu đạt mốc 3, 10, 50 người!`, { parse_mode: 'Markdown' });
+        await ctx.reply(`🎉 **Đây là Link Giới Thiệu Độc Quyền của bạn:**\n\n${inviteLink.invite_link}\n\nKhi có người tham gia nhóm thông qua link này, bạn sẽ được:\n- Cộng 2 Điểm Uy Tín\n- Nhận danh hiệu trong hồ sơ ở mốc 3, 10, 50 người (không cấp quyền quản trị nhóm).`, { parse_mode: 'Markdown' });
     } catch (err) {
         console.error('Lỗi tạo link:', err);
         await ctx.reply('❌ Có lỗi xảy ra. Vui lòng đảm bảo Bot là Admin của nhóm và có quyền "Invite Users" (Thêm thành viên).');
@@ -209,10 +222,14 @@ const handleQuanLy = async (ctx) => {
 bot.command('quanly', handleQuanLy);
 bot.action('quanly_btn', handleQuanLy);
 
-bot.action(/delsub_(.+)/, async (ctx) => {
+bot.action(/^delsub_(.+)$/, async (ctx) => {
     const subId = ctx.match[1];
+    if (ctx.chat.type !== 'private' || !/^[a-f\d]{24}$/i.test(subId)) {
+        return ctx.answerCbQuery('❌ Yêu cầu không hợp lệ.', { show_alert: true });
+    }
     try {
-        await Subscription.findByIdAndDelete(subId);
+        const removed = await Subscription.findOneAndDelete({ _id: subId, telegram_id: String(ctx.from.id) });
+        if (!removed) return ctx.answerCbQuery('❌ Không tìm thấy đăng ký của bạn.', { show_alert: true });
         await ctx.answerCbQuery('✅ Đã ngừng theo dõi thành công!', { show_alert: true });
         
         // Tải lại danh sách
@@ -298,8 +315,8 @@ bot.command('uytin', async (ctx) => {
 
 // --- 5. LỆNH SCAM (THÊM SỔ ĐEN) ---
 bot.command('scam', async (ctx) => {
-    if (!['diticomsvn', 'diticoms_vn'].includes(ctx.from.username)) {
-        return ctx.reply('🚫 Chỉ Admin @diticoms_vn mới có quyền thêm vào Sổ Đen!');
+    if (!await canManageBot(ctx)) {
+        return ctx.reply('🚫 Chỉ quản trị viên được cấu hình mới có quyền thêm vào Sổ Đen!');
     }
     
     const args = ctx.message.text.split(' ').slice(1);
@@ -311,7 +328,7 @@ bot.command('scam', async (ctx) => {
     const reason = args.slice(1).join(' ') || "Lừa đảo";
     
     try {
-        await Scammer.create({ target: target, reason: reason, added_by: ctx.from.username });
+        await Scammer.create({ target: target, reason: reason, added_by: String(ctx.from.id) });
         await ctx.reply(`🚨 **ĐÃ ĐƯA VÀO SỔ ĐEN:** \`${target}\`\nLý do: ${reason}`, { parse_mode: 'Markdown' });
     } catch (err) {
         if (err.code === 11000) {
@@ -319,31 +336,6 @@ bot.command('scam', async (ctx) => {
         } else {
             await ctx.reply('Lỗi cơ sở dữ liệu.');
         }
-    }
-});
-
-// LỆNH TEST ẨN (CHỈ ADMIN) ĐỂ NHẬN DANH HIỆU
-bot.command('testpromote', async (ctx) => {
-    if (!['diticomsvn', 'diticoms_vn'].includes(ctx.from.username)) return ctx.reply('🚫 Chỉ Admin mới được dùng lệnh này!');
-    try {
-        await User.findOneAndUpdate(
-            { telegram_id: ctx.from.id.toString() },
-            { $set: { invite_count: 50, trust_score: 100 } },
-            { upsert: true }
-        );
-        await ctx.telegram.promoteChatMember(ctx.chat.id, ctx.from.id, {
-            can_manage_chat: true,
-            can_change_info: false,
-            can_delete_messages: false,
-            can_invite_users: false,
-            can_restrict_members: false,
-            can_pin_messages: false,
-            can_promote_members: false
-        });
-        await ctx.telegram.setChatAdministratorCustomTitle(ctx.chat.id, ctx.from.id, "Ông Trùm Chợ 2nd");
-        await ctx.reply('👑 Đã hack thành công! Bạn vừa được thăng cấp lên hạng cao nhất: **Ông Trùm Chợ 2nd** (Kèm 100 Điểm Uy Tín)!', { parse_mode: 'Markdown' });
-    } catch (err) {
-        await ctx.reply('Lỗi (Có thể Bot chưa đủ quyền Admin để trao danh hiệu): ' + err.message);
     }
 });
 
@@ -377,14 +369,7 @@ bot.command('testnews', async (ctx) => {
         return ctx.reply('Lệnh này chỉ dùng được trong nhóm để tự động nhận diện quyền Admin.');
     }
     
-    try {
-        const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
-        if (member.status !== 'creator' && member.status !== 'administrator') {
-            return;
-        }
-    } catch (e) {
-        return;
-    }
+    if (!await canManageBot(ctx)) return;
     
     const news = require('./news');
     await ctx.reply('Đang lấy tin tức, vui lòng chờ...');
@@ -497,24 +482,7 @@ bot.on('chat_member', async (ctx) => {
                 else if (count === 50) customTitle = "Ông Trùm Chợ 2nd";
 
                 let titleMsg = '';
-                if (customTitle) {
-                    try {
-                        // Thăng quyền admin ảo và set danh hiệu
-                        await ctx.telegram.promoteChatMember(ctx.chat.id, parseInt(inviterId), {
-                            can_manage_chat: true,
-                            can_change_info: false,
-                            can_delete_messages: false,
-                            can_invite_users: false,
-                            can_restrict_members: false,
-                            can_pin_messages: false,
-                            can_promote_members: false
-                        });
-                        await ctx.telegram.setChatAdministratorCustomTitle(ctx.chat.id, parseInt(inviterId), customTitle);
-                        titleMsg = `\n👑 Đặc biệt: Đã được thăng cấp tước hiệu **"${customTitle}"**!`;
-                    } catch (err) {
-                        console.error('Lỗi khi set Custom Title:', err);
-                    }
-                }
+                if (customTitle) titleMsg = `\n👑 Danh hiệu trong hồ sơ: **"${customTitle}"** (không cấp quyền quản trị).`;
 
                 await ctx.reply(`🎉 Người mới **${newMember.user.first_name}** vừa gia nhập!\n\n👏 Người giới thiệu: [${inviter.first_name || 'Thành viên'}](tg://user?id=${inviter.telegram_id})\n🎁 Phần thưởng: +2 Điểm Uy Tín (Tổng đã mời: ${count} người)${titleMsg}`, { parse_mode: 'Markdown' });
             }

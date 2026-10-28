@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { describeError } = require('../src/errors');
 
-function loadHandlers(env = {}) {
+function loadHandlers(env = {}, database = {}) {
     const commands = new Map();
     const actions = new Map();
     const events = new Map();
@@ -14,7 +14,7 @@ function loadHandlers(env = {}) {
         on(name, handler) { events.set(name, handler); }
         catch() {}
     }
-    const db = { User: { findOneAndUpdate: async () => ({ trust_score: 1 }) } };
+    const db = { User: { findOneAndUpdate: async () => ({ trust_score: 1 }) }, ...database };
     vm.runInNewContext(fs.readFileSync(require.resolve('../src/bot'), 'utf8'), {
         require: name => {
             if (name === 'telegraf') return { Telegraf: TestBot };
@@ -98,3 +98,85 @@ test('logs redact bot tokens and database credentials', () => {
     assert.ok(!result.includes(token));
     assert.ok(!result.includes('password'));
 });
+
+test('privileged commands reject a copied username, demoted admins and failed lookups', async () => {
+    let writes = 0;
+    const { commands } = loadHandlers({ GROUP_CHAT_ID: '-1001', ADMIN_USER_IDS: '42' }, {
+        Scammer: { create: async () => { writes++; } }
+    });
+    for (const scenario of [
+        { id: 7, status: 'administrator' },
+        { id: 42, status: 'member' },
+        { id: 42, error: true },
+        { id: 42, status: 'creator', chat: { type: 'supergroup', id: -1002 } }
+    ]) {
+        const replies = [];
+        await commands.get('scam')({
+            from: { id: scenario.id, username: 'pduc_diticoms' },
+            chat: scenario.chat || { type: 'private' }, message: { text: '/scam example reason' },
+            telegram: { getChatMember: async () => {
+                if (scenario.error) throw new Error('offline');
+                return { status: scenario.status };
+            } },
+            reply: async text => replies.push(text)
+        });
+        assert.match(replies[0], /Chỉ quản trị viên/);
+    }
+    assert.equal(writes, 0);
+    assert.equal(commands.has('testpromote'), false);
+});
+
+test('configured numeric admin ID works without a username and records the ID', async () => {
+    let record;
+    const { commands } = loadHandlers({ GROUP_CHAT_ID: '-1001', ADMIN_USER_IDS: ' 42,43 ' }, {
+        Scammer: { create: async data => { record = data; } }
+    });
+    await commands.get('scam')({
+        from: { id: 42 }, chat: { type: 'private' }, message: { text: '/scam example reason' },
+        telegram: { getChatMember: async (chat, id) => {
+            assert.equal(chat, '-1001'); assert.equal(id, 42); return { status: 'creator' };
+        } }, reply: async () => {}
+    });
+    assert.equal(record.added_by, '42');
+});
+
+test('subscription deletion is private, validates IDs and atomically checks ownership', async () => {
+    const ownId = '1234567890abcdef12345678';
+    const otherId = 'abcdef1234567890abcdef12';
+    const records = new Map([[ownId, '42'], [otherId, '43']]);
+    let deletions = 0;
+    const { actions } = loadHandlers({}, { Subscription: {
+        findOneAndDelete: async filter => {
+            deletions++;
+            if (records.get(filter._id) !== filter.telegram_id) return null;
+            records.delete(filter._id); return { _id: filter._id };
+        }, find: async () => []
+    } });
+    const handler = [...actions].find(([key]) => String(key) === '/^delsub_(.+)$/')[1];
+    const answers = [];
+    const invoke = (id, type = 'private') => handler({
+        match: ['', id], from: { id: 42 }, chat: { type },
+        answerCbQuery: async text => answers.push(text), editMessageText: async () => {}
+    });
+    await invoke('invalid'); await invoke(ownId, 'supergroup');
+    assert.equal(deletions, 0);
+    await invoke(otherId);
+    assert.equal(records.has(otherId), true);
+    assert.match(answers.at(-1), /Không tìm thấy/);
+    await invoke(ownId);
+    assert.equal(records.has(ownId), false);
+    assert.match(answers.at(-1), /thành công/);
+});
+
+for (const count of [3, 10, 50]) {
+    test(`referral reward at ${count} invites never grants admin rights`, async () => {
+        const { events } = loadHandlers({}, { User: { findOneAndUpdate: async () => ({ invite_count: count, telegram_id: '42' }) } });
+        const replies = [];
+        await events.get('chat_member')({
+            chatMember: { old_chat_member: { status: 'left' }, new_chat_member: { status: 'member', user: { first_name: 'An' } }, invite_link: { name: 'ref_42' } },
+            telegram: new Proxy({}, { get: () => () => assert.fail('Referral rewards must not call Telegram admin APIs') }),
+            reply: async text => replies.push(text)
+        });
+        assert.match(replies[0], /Danh hiệu trong hồ sơ/);
+    });
+}
