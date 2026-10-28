@@ -28,10 +28,32 @@ function loadHandlers(env = {}) {
     return { commands, actions, events };
 }
 
-test('new members are not muted by default', async () => {
-    const { events } = loadHandlers();
-    await events.get('new_chat_members')({});
-});
+for (const env of [{}, { ENABLE_JOIN_CAPTCHA: 'false' }]) {
+    test(`new members are welcomed in General without muting (captcha=${env.ENABLE_JOIN_CAPTCHA || 'unset'})`, async () => {
+        const { events } = loadHandlers(env);
+        const sent = [];
+        let restrictions = 0;
+        await events.get('new_chat_members')({
+            chat: { id: -1001 },
+            message: { message_thread_id: 9, new_chat_members: [
+                { id: 42, first_name: 'An_[test]', is_bot: false },
+                { id: 43, username: 'Binh', is_bot: false },
+                { id: 44, is_bot: true }
+            ] },
+            telegram: {
+                sendMessage: async (...args) => { sent.push(args); },
+                restrictChatMember: async () => { restrictions++; }
+            }
+        });
+        assert.equal(restrictions, 0);
+        assert.equal(sent.length, 2);
+        assert.equal(sent[0][0], -1001);
+        assert.match(sent[0][1], /An_\[test\]/);
+        assert.match(sent[1][1], /Binh/);
+        assert.match(sent[0][1], /không cần bấm xác nhận/);
+        assert.equal(sent[0].length, 2, 'no thread ID, Markdown parsing or verification buttons');
+    });
+}
 
 test('unlock restores group defaults without granting topic management', async () => {
     const { actions } = loadHandlers({ GROUP_CHAT_ID: '-1001' });

@@ -411,19 +411,27 @@ bot.command('gettopicid', async (ctx) => {
 
 // --- CHÀO MỪNG & CAPTCHA NGƯỜI MỚI ---
 bot.on('new_chat_members', async (ctx) => {
-    // Mặc định cho phép thành viên mới gửi tin theo quyền của nhóm.
-    if (process.env.ENABLE_JOIN_CAPTCHA !== 'true') return;
     const newMembers = ctx.message.new_chat_members;
     for (const member of newMembers) {
         if (member.is_bot) continue;
         const name = member.first_name || member.username || 'Thành viên mới';
         
         try {
+            if (process.env.ENABLE_JOIN_CAPTCHA !== 'true') {
+                // Không truyền thread ID để lời chào luôn gửi vào Sảnh Chung.
+                await ctx.telegram.sendMessage(
+                    ctx.chat.id,
+                    `👋 Chào mừng ${name} đến với Chợ 2nd!\n\n💬 Bạn có thể nhắn tin ngay, không cần bấm xác nhận.\n📌 Sảnh Chung dành cho thông báo. Hãy vào Topic Thảo Luận - Hỏi Đáp để trò chuyện hoặc chọn Topic mua bán phù hợp để đăng bài.\n\n🤝 Chúc bạn giao lưu vui vẻ, mua may bán đắt!`
+                );
+                continue;
+            }
+
             await ctx.telegram.restrictChatMember(ctx.chat.id, member.id, {
                 permissions: { can_send_messages: false }
             });
 
-            const captchaMsg = await ctx.reply(
+            const captchaMsg = await ctx.telegram.sendMessage(
+                ctx.chat.id,
                 `👋 Chào mừng **${name}** đã tham gia Chợ 2nd!\n\n⚠️ Để bảo vệ nhóm khỏi Bot tự động, vui lòng bấm nút bên dưới để mở khóa chat! (Tin nhắn tự hủy sau 2 phút)`,
                 {
                     parse_mode: 'Markdown',
@@ -440,7 +448,7 @@ bot.on('new_chat_members', async (ctx) => {
                 ctx.telegram.deleteMessage(ctx.chat.id, captchaMsg.message_id).catch(() => {});
             }, 120000);
         } catch (err) {
-            console.error('Lỗi khi xử lý Captcha:', err);
+            console.error('Lỗi khi chào đón thành viên mới:', describeError(err));
         }
     }
 });

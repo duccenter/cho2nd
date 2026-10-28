@@ -24,6 +24,9 @@ Có thể dùng Blueprint `render.yaml` để điền sẵn cấu hình dịch v
 | `NODE_VERSION` | `22` trên Render. |
 | `WEBHOOK_URL` | URL gốc HTTPS nếu chạy ngoài Render; trên Render để trống. |
 
+Bot chào thành viên mới tại Sảnh Chung và hướng dẫn chọn Topic để nhắn tin.
+Lời chào vẫn hoạt động khi tắt xác minh; không khóa quyền gửi tin của người mới.
+
 Render tự cấp `PORT` và `RENDER_EXTERNAL_URL`. Bot tự đăng ký webhook có xác thực,
 không chạy polling trên Render. Chỉ chạy một dịch vụ cho cùng một token.
 MongoDB Atlas phải cho phép kết nối từ các outbound IP của dịch vụ Render;
