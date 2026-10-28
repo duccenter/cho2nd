@@ -17,6 +17,7 @@ Có thể dùng Blueprint `render.yaml` để điền sẵn cấu hình dịch v
 | `BOT_TOKEN` | Token bot do BotFather cấp; bắt buộc. |
 | `MONGO_URI` | URI MongoDB có tên database, ví dụ `cho2nd`; bắt buộc. |
 | `GROUP_CHAT_ID` | ID nhóm đích, thường bắt đầu bằng `-100`. |
+| `ADMIN_USER_IDS` | ID số Telegram của người được phép dùng `/scam` và `/testnews`, cách nhau bằng dấu phẩy. Người đó phải còn là admin của nhóm đích. Để trống sẽ khóa các lệnh này. |
 | `MUABAN_TOPIC_IDS` | Danh sách ID topic mua bán, ngăn cách bằng dấu phẩy. |
 | `ENABLE_JOIN_CAPTCHA` | Mặc định `false`: người mới được gửi tin theo quyền nhóm. Đặt `true` để yêu cầu bấm xác minh. Mở khóa chỉ khôi phục quyền mặc định của nhóm. |
 | `NEWS_TOPIC_ID` | Topic nhận bản tin; để trống để gửi vào sảnh chung. |
@@ -26,6 +27,8 @@ Có thể dùng Blueprint `render.yaml` để điền sẵn cấu hình dịch v
 
 Bot chào thành viên mới tại Sảnh Chung và hướng dẫn chọn Topic để nhắn tin.
 Lời chào vẫn hoạt động khi tắt xác minh; không khóa quyền gửi tin của người mới.
+Danh hiệu giới thiệu chỉ xuất hiện trong hồ sơ, không cấp quyền admin Telegram.
+Bot không cần quyền thêm quản trị viên. Đăng ký săn đồ chỉ được xóa bởi chủ sở hữu.
 
 Render tự cấp `PORT` và `RENDER_EXTERNAL_URL`. Bot tự đăng ký webhook có xác thực,
 không chạy polling trên Render. Chỉ chạy một dịch vụ cho cùng một token.
