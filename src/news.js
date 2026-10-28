@@ -1,5 +1,5 @@
 const Parser = require('rss-parser');
-const parser = new Parser();
+const parser = new Parser({ timeout: 10000 });
 
 // RSS VNExpress
 const TECH_RSS = 'https://vnexpress.net/rss/so-hoa.rss';
@@ -31,8 +31,10 @@ async function fetchLatestNews(rssUrl) {
 }
 
 async function getDailyNewsMessage() {
-    const techNews = await fetchLatestNews(TECH_RSS);
-    const financeNews = await fetchLatestNews(FINANCE_RSS);
+    const [techNews, financeNews] = await Promise.all([
+        fetchLatestNews(TECH_RSS),
+        fetchLatestNews(FINANCE_RSS)
+    ]);
     
     let msg = `🌅 **BẢN TIN CHỢ 2ND - ĐIỂM TIN 10H SÁNG**\n\n`;
     

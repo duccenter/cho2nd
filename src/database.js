@@ -1,18 +1,11 @@
 const mongoose = require('mongoose');
+mongoose.set('bufferCommands', false);
 
 // Kết nối cơ sở dữ liệu
 const connectDB = async () => {
-    try {
-        if (!process.env.MONGO_URI) {
-            console.log('⚠️ CHÚ Ý: Chưa có biến môi trường MONGO_URI.');
-            console.log('Bot vẫn sẽ chạy nhưng tính năng Điểm Uy Tín và Săn Đồ sẽ không lưu được dữ liệu!');
-            return;
-        }
-        await mongoose.connect(process.env.MONGO_URI);
-        console.log('✅ Đã kết nối với MongoDB thành công!');
-    } catch (err) {
-        console.error('❌ Lỗi kết nối MongoDB:', err);
-    }
+    if (!process.env.MONGO_URI) throw new Error('Chưa cấu hình MONGO_URI.');
+    await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 });
+    console.log('✅ Đã kết nối với MongoDB thành công!');
 };
 
 // Định nghĩa Cấu trúc Dữ liệu (Schema)
@@ -46,4 +39,7 @@ const User = mongoose.model('User', UserSchema);
 const Subscription = mongoose.model('Subscription', SubscriptionSchema);
 const Scammer = mongoose.model('Scammer', ScammerSchema);
 
-module.exports = { connectDB, User, Subscription, Scammer };
+const isConnected = () => mongoose.connection.readyState === 1;
+const disconnectDB = () => mongoose.disconnect();
+
+module.exports = { connectDB, disconnectDB, isConnected, User, Subscription, Scammer };

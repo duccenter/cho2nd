@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: cho2nd-bot
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: BOT_TOKEN
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: GROUP_CHAT_ID
+        sync: false
+      - key: MUABAN_TOPIC_IDS
+        sync: false
+      - key: NEWS_TOPIC_ID
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
