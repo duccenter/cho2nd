@@ -44,12 +44,12 @@ function fixture() {
                 j.active = false; j.state = 'expired';
             }
         },
-        async countRecent(owner, since) { return [...jobs.values()].filter(j => j.owner === owner && +j.created_at >= +since).length; },
+        async countRecent(owner, since) { return [...jobs.values()].filter(j => (!owner || j.owner === owner) && +j.created_at >= +since).length; },
         async create(job) {
             if ([...jobs.values()].some(j => j.owner === job.owner && j.active)) throw Object.assign(new Error('duplicate'), { code: 11000 });
             jobs.set(job._id, job);
         },
-        async latest(owner) { return [...jobs.values()].filter(j => j.owner === owner).at(-1); },
+        async latest(owner, route) { return [...jobs.values()].filter(j => sameScope(j, owner, route)).at(-1); },
         async claim(now, token) {
             const j = [...jobs.values()].find(j => j.active && +j.deadline > +now && j.attempts < 3 &&
                 (j.state === 'pending' || (j.state === 'leased' && +j.lease_until <= +now)));
@@ -64,8 +64,8 @@ function fixture() {
             return j;
         },
         async get(id) { return jobs.get(id); },
-        async cancel(owner) {
-            const j = [...jobs.values()].find(j => j.owner === owner && j.active);
+        async cancel(owner, route) {
+            const j = [...jobs.values()].find(j => sameScope(j, owner, route) && j.active);
             if (j) { j.active = false; j.state = 'cancelled'; delete j.lease_token; }
             return j;
         },
@@ -80,19 +80,23 @@ function fixture() {
     };
     const sends = [];
     const telegram = { async sendMessage(...args) { sends.push(args); } };
-    const config = readConfig({ MUSE_ENABLED: 'true', MUSE_ALLOWED_USER_IDS: '42', MUSE_BRIDGE_KEY: key });
+    const sameScope = (j, owner, route) => j.owner === owner &&
+        (j.chat_id || j.owner) === route.chat_id && j.thread_id === route.thread_id;
+    const config = readConfig({ MUSE_ENABLED: 'true', GROUP_CHAT_ID: '-100123', MUSE_BRIDGE_KEY: key });
     const bridge = createMuseBridge({ config, store, telegram, logger: { error() {} }, now: () => new Date(clock) });
     function ctx(text = '/muse iPhone 13 cũ tại TP.HCM', id = 42, type = 'private') {
         const replies = [];
-        return { chat: { type }, from: { id }, message: { text }, replies,
+        return { chat: { type, id: type === 'private' ? id : -100123 }, from: { id },
+            message: { text, message_id: 100, ...(type === 'private' ? {} : { message_thread_id: 9 }) }, replies,
             async reply(...args) { replies.push(args); } };
     }
     return { bridge, config, jobs, sends, store, telegram, ctx, advance: ms => { clock += ms; } };
 }
 
-test('Muse is disabled by default and enabled mode fails closed without strong key and explicit IDs', () => {
+test('search is disabled by default and enabled mode requires a strong key and valid group ID', () => {
     assert.equal(readConfig({}), null);
-    assert.throws(() => readConfig({ MUSE_ENABLED: 'true' }), /USER_IDS/);
+    assert.throws(() => readConfig({ MUSE_ENABLED: 'true' }), /BRIDGE_KEY/);
+    assert.throws(() => readConfig({ MUSE_ENABLED: 'true', MUSE_BRIDGE_KEY: key, GROUP_CHAT_ID: 'wrong' }), /GROUP_CHAT_ID/);
     assert.throws(() => readConfig({ MUSE_ENABLED: 'true', MUSE_ALLOWED_USER_IDS: '42', MUSE_BRIDGE_KEY: 'short' }), /BRIDGE_KEY/);
     assert.equal(readConfig({ MUSE_ENABLED: 'true', MUSE_ALLOWED_USER_IDS: '42', MUSE_BRIDGE_KEY: 'ab'.repeat(16) }).key.length, 32);
     for (const invalid of ['a'.repeat(31), 'a'.repeat(33), 'g'.repeat(32)]) {
@@ -100,10 +104,13 @@ test('Muse is disabled by default and enabled mode fails closed without strong k
     }
 });
 
-test('only allowed private users enqueue, normal data and arbitrary recipients cannot be submitted', async () => {
+test('private users and configured group topics can search; other groups, General and bots cannot', async () => {
     const f = fixture();
-    await f.bridge.commands.search(f.ctx(undefined, 99));
-    await f.bridge.commands.search(f.ctx(undefined, 42, 'supergroup'));
+    const otherGroup = f.ctx(undefined, 42, 'supergroup'); otherGroup.chat.id = -100999;
+    const general = f.ctx(undefined, 42, 'supergroup'); delete general.message.message_thread_id;
+    const bot = f.ctx(); bot.from.is_bot = true;
+    const anonymous = f.ctx(undefined, 42, 'supergroup'); anonymous.message.sender_chat = { id: -100123 };
+    for (const rejected of [otherGroup, general, bot, anonymous]) await f.bridge.commands.search(rejected);
     await f.bridge.commands.search(f.ctx('/muse https://example.com'));
     assert.equal(f.jobs.size, 0);
     await f.bridge.commands.search(f.ctx());
@@ -117,6 +124,75 @@ test('only allowed private users enqueue, normal data and arbitrary recipients c
     assert.deepEqual(await f.bridge.claim(), { job: null });
     assert.throws(() => resultSchema.parse({ ...result, chat_id: '-10099' }));
     assert.throws(() => resultSchema.parse({ ...result, products: [{ ...result.products[0], url: 'https://facebook.com.evil.example/123' }] }));
+    await f.bridge.commands.search(f.ctx('/batam máy tính tại Hà Nội', 99));
+    await f.bridge.commands.search(f.ctx('/batam@batam_2nd_bot iPhone cũ', 100, 'supergroup'));
+    assert.equal(f.jobs.size, 3);
+});
+
+test('group results reply to the original message in the original topic without leaking routing to Muse', async () => {
+    const f = fixture();
+    const ctx = f.ctx('/batam iPhone cũ', 99, 'supergroup');
+    await f.bridge.commands.search(ctx);
+    assert.equal(ctx.replies[0][1].message_thread_id, 9);
+    const { job } = await f.bridge.claim();
+    assert.ok(!JSON.stringify(job).includes('chat_id'));
+    assert.ok(!JSON.stringify(job).includes('thread_id'));
+    await f.bridge.complete({ job_id: job.job_id, lease_token: job.lease_token, result });
+    await f.bridge.drain();
+    assert.equal(f.sends[0][0], '-100123');
+    assert.equal(f.sends[0][2].message_thread_id, 9);
+    assert.deepEqual(f.sends[0][2].reply_parameters, { message_id: 100, allow_sending_without_reply: true });
+    const privateCtx = f.ctx('/batam_status', 99);
+    await f.bridge.commands.status(privateCtx);
+    assert.doesNotMatch(privateCtx.replies[0][0], /iPhone/);
+    const otherTopic = f.ctx('/batam_status', 99, 'supergroup');
+    otherTopic.message.message_thread_id = 2;
+    await f.bridge.commands.status(otherTopic);
+    assert.doesNotMatch(otherTopic.replies[0][0], /iPhone/);
+});
+
+test('Mongo status and cancel filters bind owner, chat and thread; legacy private records remain private', async () => {
+    const filters = [];
+    const query = { sort() { return this; }, async lean() { return null; } };
+    const store = createMongoStore({
+        findOne(filter) { filters.push(filter); return query; },
+        findOneAndUpdate(filter) { filters.push(filter); return query; }
+    });
+    await store.latest('42', { chat_id: '-100123', thread_id: 9 });
+    await store.cancel('42', { chat_id: '-100123', thread_id: 2 });
+    assert.deepEqual(filters[0], { owner: '42', $or: [{ chat_id: '-100123', thread_id: 9 }] });
+    assert.deepEqual(filters[1], { owner: '42', active: true, $or: [{ chat_id: '-100123', thread_id: 2 }] });
+    await store.latest('42', { chat_id: '42' });
+    assert.deepEqual(filters[2], { owner: '42', $or: [
+        { chat_id: '42', thread_id: { $exists: false } }, { chat_id: { $exists: false } }
+    ] });
+});
+
+test('private results and cancellation stay private even when the same user asks in a group', async () => {
+    const f = fixture();
+    await f.bridge.commands.search(f.ctx('tìm máy ảnh tại Huế', 99));
+    const group = f.ctx('/batam_status', 99, 'supergroup');
+    await f.bridge.commands.status(group);
+    await f.bridge.commands.cancel(group);
+    assert.equal([...f.jobs.values()][0].active, true);
+    assert.doesNotMatch(JSON.stringify(group.replies), /máy ảnh/);
+    const { job } = await f.bridge.claim();
+    await f.bridge.complete({ job_id: job.job_id, lease_token: job.lease_token, result });
+    await f.bridge.drain();
+    assert.equal(f.sends[0][0], '99');
+    assert.equal(f.sends[0][2].message_thread_id, undefined);
+});
+
+test('concurrent requests share a 12-per-hour cap and greetings do not consume searches', async () => {
+    const f = fixture();
+    const greeting = f.ctx('xin chào', 99);
+    await f.bridge.commands.search(greeting);
+    assert.equal(f.jobs.size, 0);
+    await Promise.all(Array.from({ length: 20 }, (_, i) => f.bridge.commands.search(f.ctx('tìm iPhone tại HCM', 100 + i))));
+    assert.equal(f.jobs.size, 12);
+    f.advance(61 * 60000);
+    await f.bridge.commands.search(f.ctx('tìm iPhone tại HCM', 999));
+    assert.equal(f.jobs.size, 13);
 });
 
 test('completion binds to lease, is idempotent and delivers only to the original requester', async () => {

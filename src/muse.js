@@ -24,20 +24,18 @@ const completionSchema = {
 
 function readConfig(env) {
     if (env.MUSE_ENABLED !== 'true') return null;
-    const owners = (env.MUSE_ALLOWED_USER_IDS || '').split(',').map(x => x.trim()).filter(Boolean);
-    if (!owners.length || owners.some(x => !/^[1-9]\d*$/.test(x))) {
-        throw new Error('MUSE_ALLOWED_USER_IDS phải có ID người dùng Telegram được phép thử.');
-    }
     // Render's Generate button creates a 16-byte hex secret. Also accept the
     // recommended 32-byte secret; both must be generated randomly.
     if (!/^(?:[a-f0-9]{32}|[a-f0-9]{64})$/.test(env.MUSE_BRIDGE_KEY || '')) {
         throw new Error('MUSE_BRIDGE_KEY phải là 16 hoặc 32 byte ngẫu nhiên mã hóa hex (32 hoặc 64 ký tự).');
     }
-    return { owners, key: env.MUSE_BRIDGE_KEY };
+    const groupId = env.GROUP_CHAT_ID || '';
+    if (groupId && !/^-\d+$/.test(groupId)) throw new Error('GROUP_CHAT_ID phải là ID nhóm Telegram.');
+    return { groupId, key: env.MUSE_BRIDGE_KEY };
 }
 
 function formatResult(result) {
-    return '🔎 Kết quả Muse (Facebook Marketplace)\n\n' + result.summary +
+    return '🔎 Kết quả Batam (Facebook Marketplace)\n\n' + result.summary +
         result.products.map((p, i) => `\n\n${i + 1}. ${p.title}\nGiá: ${p.price || 'Chưa rõ'}\n` +
             `Khu vực: ${p.location || 'Chưa rõ'}\nNgày đăng: ${p.posted_at || 'Chưa rõ'}\n` +
             (p.note ? `${p.note}\n` : '') + p.url).join('') +
@@ -45,6 +43,10 @@ function formatResult(result) {
 }
 
 function createMongoStore(Job) {
+    const scope = (owner, route) => ({ owner, $or: [
+        { chat_id: route.chat_id, thread_id: route.thread_id ?? { $exists: false } },
+        ...(route.chat_id === owner ? [{ chat_id: { $exists: false } }] : [])
+    ] });
     const recover = async now => {
         await Job.updateMany({ active: true, $or: [
             { deadline: { $lte: now } },
@@ -59,9 +61,9 @@ function createMongoStore(Job) {
             await Job.createIndexes();
         },
         recover,
-        countRecent: (owner, since) => Job.countDocuments({ owner, created_at: { $gte: since } }),
+        countRecent: (owner, since) => Job.countDocuments({ ...(owner ? { owner } : {}), created_at: { $gte: since } }),
         create: data => Job.create(data),
-        latest: owner => Job.findOne({ owner }).sort({ created_at: -1 }).lean(),
+        latest: (owner, route) => Job.findOne(scope(owner, route)).sort({ created_at: -1 }).lean(),
         claim: (now, token) => Job.findOneAndUpdate({
             active: true, deadline: { $gt: now }, attempts: { $lt: 3 },
             $or: [{ state: 'pending' }, { state: 'leased', lease_until: { $lte: now } }]
@@ -72,7 +74,7 @@ function createMongoStore(Job) {
             lease_until: { $gt: now }, deadline: { $gt: now }
         }, { $set: { state: 'completed', active: false, result, delivery: 'pending' } }, { new: true }).lean(),
         get: id => Job.findById(id).lean(),
-        cancel: owner => Job.findOneAndUpdate({ owner, active: true },
+        cancel: (owner, route) => Job.findOneAndUpdate({ ...scope(owner, route), active: true },
             { $set: { active: false, state: 'cancelled' }, $unset: { lease_token: 1 } }, { new: true }).lean(),
         takeDelivery: now => Job.findOneAndUpdate({ state: 'completed', delivery_attempts: { $lt: 3 },
             $or: [{ delivery: 'pending' }, { delivery: 'sending', delivery_until: { $lte: now } }]
@@ -87,43 +89,63 @@ function createMuseBridge({ config, store, telegram, logger = console, now = () 
     let timer;
     let draining = false;
     let lastClaim;
-    const allowed = ctx => ctx.chat?.type === 'private' && config.owners.includes(String(ctx.from?.id));
+    let admission = Promise.resolve();
+    const allowed = ctx => ctx.from?.id && !ctx.from.is_bot && !ctx.message?.sender_chat && (
+        ctx.chat?.type === 'private' ||
+        (['group', 'supergroup'].includes(ctx.chat?.type) && String(ctx.chat.id) === config.groupId &&
+            Number(ctx.message?.message_thread_id) > 1));
+    const route = ctx => ({ chat_id: String(ctx.chat.id),
+        ...(ctx.chat.type !== 'private' ? { thread_id: ctx.message.message_thread_id } : {}) });
+    const reply = (ctx, text, extra = {}) => ctx.reply(text, {
+        ...extra, ...(ctx.chat.type !== 'private' && ctx.message?.message_thread_id ?
+            { message_thread_id: ctx.message.message_thread_id } : {})
+    });
     const commands = {
-        async search(ctx) {
-            if (!allowed(ctx)) return ctx.reply('Tìm kiếm Muse đang thử nghiệm riêng cho tài khoản được cấu hình.');
-            const query = (ctx.message.text || '').replace(/^\/muse(?:@\w+)?\s*/i, '').trim();
+        async search(ctx, text) {
+            if (!allowed(ctx)) return reply(ctx, 'Hãy tìm với Batam trong chat riêng hoặc Topic của nhóm Chợ 2nd, trừ Sảnh Chung.');
+            const query = (text ?? ctx.message.text ?? '').replace(/^\/(?:batam|muse)(?:@\w+)?(?:\s+|$)/i, '').trim();
+            if (/^(?:xin chào|chào(?: bot| batam)?|hello|hi|hey)[!.\s]*$/i.test(query)) {
+                return reply(ctx, 'Chào bạn! Hãy cho Batam biết sản phẩm, khu vực và ngân sách cần tìm. Ví dụ: tìm iPhone 13 cũ tại TP.HCM dưới 6 triệu.');
+            }
             if (!query || query.length > 180 || /[\x00-\x1f]|https?:\/\//i.test(query)) {
-                return ctx.reply('Dùng /muse <sản phẩm, khu vực, ngân sách> (tối đa 180 ký tự, không chứa link). Ví dụ: /muse iPhone 13 cũ tại TP.HCM dưới 6 triệu');
+                return reply(ctx, 'Cho Batam biết sản phẩm, khu vực, ngân sách (tối đa 180 ký tự, không chứa link). Trong nhóm: @batam_2nd_bot tìm iPhone 13 cũ tại TP.HCM dưới 6 triệu. Chat riêng có thể gõ thẳng nhu cầu.');
             }
             const owner = String(ctx.from.id);
-            const current = now();
-            await store.recover(current);
-            if (await store.countRecent(owner, new Date(+current - 3600000)) >= 12) {
-                return ctx.reply('Đã đạt giới hạn 12 lượt mỗi giờ. Vui lòng thử lại sau.');
-            }
-            try {
-                await store.create({ _id: randomUUID(), owner, query, active: true, state: 'pending',
-                    attempts: 0, delivery_attempts: 0, created_at: current,
-                    deadline: new Date(+current + 3600000), expires_at: new Date(+current + 86400000) });
-            } catch (error) {
-                if (error.code === 11000) return ctx.reply('Bạn còn một lượt tìm đang chờ. Dùng /muse_status hoặc /muse_cancel.');
-                throw error;
-            }
-            return ctx.reply('Đã xếp lượt tìm cho Muse. Muse kiểm tra theo lịch nên có thể mất vài phút hoặc lâu hơn. Kết quả sẽ gửi riêng tại đây. Dùng /muse_status để xem, /muse_cancel để hủy.');
+            // Serialize admissions in this single Render process so concurrent
+            // group mentions cannot all pass the shared Free-plan quota check.
+            const queued = admission.then(async () => {
+                const current = now();
+                const since = new Date(+current - 3600000);
+                await store.recover(current);
+                if (await store.countRecent(owner, since) >= 12) return 'Đã đạt giới hạn 12 lượt mỗi người mỗi giờ. Vui lòng thử lại sau.';
+                if (await store.countRecent(null, since) >= 12) return 'Batam đã đủ 12 lượt tìm chung trong một giờ trên gói Free. Vui lòng thử lại sau.';
+                try {
+                    await store.create({ _id: randomUUID(), owner, ...route(ctx),
+                        reply_to_message_id: ctx.message.message_id, query, active: true, state: 'pending',
+                        attempts: 0, delivery_attempts: 0, created_at: current,
+                        deadline: new Date(+current + 3600000), expires_at: new Date(+current + 86400000) });
+                } catch (error) {
+                    if (error.code === 11000) return 'Bạn còn một lượt tìm đang chờ. Dùng /batam_status hoặc /batam_cancel tại nơi đã gửi yêu cầu.';
+                    throw error;
+                }
+                return 'Batam đã nhận yêu cầu. Kết quả sẽ trả tại đây sau vài phút hoặc lâu hơn, theo lịch xử lý. Dùng /batam_status để xem, /batam_cancel để hủy.';
+            });
+            admission = queued.catch(() => {});
+            return reply(ctx, await queued);
         },
         async status(ctx) {
-            if (!allowed(ctx)) return ctx.reply('Tìm kiếm Muse đang thử nghiệm riêng.');
+            if (!allowed(ctx)) return reply(ctx, 'Hãy dùng Batam trong chat riêng hoặc Topic của nhóm Chợ 2nd.');
             await store.recover(now());
-            const job = await store.latest(String(ctx.from.id));
-            if (!job) return ctx.reply('Chưa có lượt tìm Muse. Dùng /muse <sản phẩm và khu vực>.');
-            if (job.state === 'completed') return ctx.reply(formatResult(job.result), { link_preview_options: { is_disabled: true } });
-            const states = { pending: 'đang chờ Muse', leased: 'Muse đã nhận xử lý', expired: 'hết thời gian chờ; hãy thử lại', cancelled: 'đã hủy' };
-            return ctx.reply(`Lượt tìm gần nhất: ${states[job.state] || job.state}.`);
+            const job = await store.latest(String(ctx.from.id), route(ctx));
+            if (!job) return reply(ctx, 'Chưa có lượt tìm Batam trong cuộc trò chuyện này. Hãy nhập sản phẩm và khu vực cần tìm.');
+            if (job.state === 'completed') return reply(ctx, formatResult(job.result), { link_preview_options: { is_disabled: true } });
+            const states = { pending: 'đang chờ xử lý', leased: 'đã nhận xử lý', expired: 'hết thời gian chờ; hãy thử lại', cancelled: 'đã hủy' };
+            return reply(ctx, `Lượt tìm gần nhất: ${states[job.state] || job.state}.`);
         },
         async cancel(ctx) {
-            if (!allowed(ctx)) return ctx.reply('Tìm kiếm Muse đang thử nghiệm riêng.');
-            const job = await store.cancel(String(ctx.from.id));
-            return ctx.reply(job ? 'Đã hủy lượt tìm; kết quả gửi muộn của lượt này sẽ bị từ chối.' : 'Không có lượt tìm đang chờ.');
+            if (!allowed(ctx)) return reply(ctx, 'Hãy dùng Batam trong chat riêng hoặc Topic của nhóm Chợ 2nd.');
+            const job = await store.cancel(String(ctx.from.id), route(ctx));
+            return reply(ctx, job ? 'Đã hủy lượt tìm; kết quả gửi muộn của lượt này sẽ bị từ chối.' : 'Không có lượt tìm đang chờ trong cuộc trò chuyện này.');
         }
     };
     const claim = async () => {
@@ -153,7 +175,13 @@ function createMuseBridge({ config, store, telegram, logger = console, now = () 
             const job = await store.takeDelivery(now());
             if (!job) return;
             try {
-                await telegram.sendMessage(job.owner, formatResult(job.result), { link_preview_options: { is_disabled: true } });
+                await telegram.sendMessage(job.chat_id || job.owner, formatResult(job.result), {
+                    link_preview_options: { is_disabled: true },
+                    ...(job.thread_id ? { message_thread_id: job.thread_id } : {}),
+                    ...(job.reply_to_message_id ? { reply_parameters: {
+                        message_id: job.reply_to_message_id, allow_sending_without_reply: true
+                    } } : {})
+                });
                 await store.delivered(job._id, true);
             } catch {
                 await store.delivered(job._id, false);
