@@ -52,7 +52,12 @@ function createMongoStore(Job) {
         ] }, { $set: { state: 'expired', active: false } });
     };
     return {
-        init: () => Job.init(),
+        // bufferCommands=false means eager Model.init() can fail before connect.
+        // The service calls this only after MongoDB has connected.
+        async init() {
+            await Job.createCollection();
+            await Job.createIndexes();
+        },
         recover,
         countRecent: (owner, since) => Job.countDocuments({ owner, created_at: { $gte: since } }),
         create: data => Job.create(data),
