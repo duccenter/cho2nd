@@ -46,7 +46,8 @@ const MuseJobSchema = new mongoose.Schema({
     chat_id: String,
     thread_id: Number,
     reply_to_message_id: Number,
-    query: { type: String, required: true, maxlength: 180 },
+    request_key: String,
+    query: { type: String, required: true, maxlength: 600 },
     active: { type: Boolean, required: true },
     state: { type: String, enum: ['pending', 'leased', 'completed', 'cancelled', 'expired'], required: true },
     attempts: { type: Number, default: 0 },
@@ -63,6 +64,7 @@ const MuseJobSchema = new mongoose.Schema({
 MuseJobSchema.index({ owner: 1 }, { unique: true, partialFilterExpression: { active: true } });
 MuseJobSchema.index({ expires_at: 1 }, { expireAfterSeconds: 0 });
 MuseJobSchema.index({ state: 1, active: 1, created_at: 1 });
+MuseJobSchema.index({ request_key: 1 }, { unique: true, partialFilterExpression: { request_key: { $type: 'string' } } });
 const MuseJob = mongoose.model('MuseJob', MuseJobSchema);
 
 const isConnected = () => mongoose.connection.readyState === 1;
