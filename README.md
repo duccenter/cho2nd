@@ -55,6 +55,15 @@ cấu hình bộ lập lịch bên ngoài gọi `GET /cron/news` với header
 API chặn gửi chồng và gửi lại trong cùng ngày khi tiến trình còn chạy;
 trạng thái này không được lưu qua lần khởi động lại.
 
+## Tìm sản phẩm qua Muse (thử nghiệm)
+
+Lệnh `/muse <sản phẩm, khu vực, ngân sách>` tạo công việc riêng cho ID được phép.
+Muse lấy việc qua MCP, tìm Marketplace và trả liên kết; Batam gửi kết quả riêng.
+`/muse_status` xem lượt gần nhất, `/muse_cancel` hủy lượt đang chờ.
+Mặc định tắt (`MUSE_ENABLED=false`); phải kết nối custom MCP và thử lịch Muse
+trước khi công bố dùng được. Các lệnh nhóm và webhook hiện tại vẫn hoạt động.
+Xem [thiết lập và giới hạn](docs/muse-agent.md). Không lưu cookie/token vào GitHub.
+
 ## Chạy trên máy cá nhân
 
 Sao chép `.env.example` thành `.env`, điền cấu hình rồi chạy:

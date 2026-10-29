@@ -10,6 +10,15 @@ if (!process.env.BOT_TOKEN) {
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const BAD_WORDS = ['đm', 'vcl', 'địt', 'lồn', 'cặc', 'phò', 'đĩ', 'chó đẻ'];
 
+// Register before the generic message/form handler. Disabled unless the service
+// supplies a configured bridge; ordinary private messages are never forwarded.
+for (const [name, handler] of [['muse', 'search'], ['muse_status', 'status'], ['muse_cancel', 'cancel']]) {
+    bot.command(name, async ctx => {
+        if (!ctx.museBridge) return ctx.reply('Tìm kiếm Muse chưa được bật.');
+        return ctx.museBridge.commands[handler](ctx);
+    });
+}
+
 async function canManageBot(ctx) {
     const allowedIds = (process.env.ADMIN_USER_IDS || '').split(',').map(id => id.trim());
     const chatId = process.env.GROUP_CHAT_ID;
