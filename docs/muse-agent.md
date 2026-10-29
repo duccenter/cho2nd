@@ -16,8 +16,9 @@ Tin nhắn thông thường, dữ liệu nhóm, tên và Telegram ID không đư
 
 - `MUSE_ENABLED=true`
 - `MUSE_ALLOWED_USER_IDS`: ID số được phép dùng thử; bắt đầu bằng chủ bot.
-- `MUSE_BRIDGE_KEY`: 32 byte ngẫu nhiên dưới dạng 64 ký tự hex; chỉ lưu trong
-  Render environment và kho thông tin đăng nhập an toàn của Muse.
+- `MUSE_BRIDGE_KEY`: khóa ngẫu nhiên 16 hoặc 32 byte (32 hoặc 64 ký tự hex).
+  Khuyên dùng 64 ký tự; hỗ trợ khóa 128 bit từ nút Generate của Render.
+  Chỉ lưu trong Render environment và kho thông tin đăng nhập an toàn của Muse.
 
 Khi chưa bật, `/muse/mcp` không tồn tại. Khi bật, API yêu cầu
 `Authorization: Bearer <MUSE_BRIDGE_KEY>`, không nhận cookie hoặc key qua URL.
