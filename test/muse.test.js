@@ -21,7 +21,7 @@ test('real Mongoose queue model defers collection and indexes until after connec
     isolated.connection.readyState = 1;
     await createMongoStore(Job).init();
     assert.equal(calls[0][0], 'collection');
-    assert.equal(calls.filter(c => c[0] === 'index').length, 3);
+    assert.equal(calls.filter(c => c[0] === 'index').length, 4);
     assert.ok(calls.some(c => c[2]?.unique && c[2]?.partialFilterExpression?.active === true));
     assert.ok(calls.some(c => c[2]?.expireAfterSeconds === 0));
 });
@@ -36,17 +36,18 @@ const result = { summary: 'Đã đọc một tin rao; chưa xác minh người b
 function fixture() {
     const jobs = new Map();
     let clock = Date.now();
+    let messageId = 99;
     const store = {
         async init() {},
         async recover(now) {
             for (const j of jobs.values()) if (j.active && (+j.deadline <= +now ||
                 (j.state === 'leased' && +j.lease_until <= +now && j.attempts >= 3))) {
-                j.active = false; j.state = 'expired';
+                j.active = false; j.state = 'expired'; j.delivery = 'pending';
             }
         },
-        async countRecent(owner, since) { return [...jobs.values()].filter(j => (!owner || j.owner === owner) && +j.created_at >= +since).length; },
+        async byRequest(requestKey) { return [...jobs.values()].find(j => j.request_key === requestKey); },
         async create(job) {
-            if ([...jobs.values()].some(j => j.owner === job.owner && j.active)) throw Object.assign(new Error('duplicate'), { code: 11000 });
+            if ([...jobs.values()].some(j => (j.owner === job.owner && j.active) || (job.request_key && j.request_key === job.request_key))) throw Object.assign(new Error('duplicate'), { code: 11000 });
             jobs.set(job._id, job);
         },
         async latest(owner, route) { return [...jobs.values()].filter(j => sameScope(j, owner, route)).at(-1); },
@@ -70,13 +71,17 @@ function fixture() {
             return j;
         },
         async takeDelivery(now) {
-            const j = [...jobs.values()].find(j => j.state === 'completed' && j.delivery_attempts < 3 &&
-                (j.delivery === 'pending' || (j.delivery === 'sending' && +j.delivery_until <= +now)));
+            const j = [...jobs.values()].find(j => ['completed', 'expired'].includes(j.state) && j.delivery_attempts < 3 &&
+                ((j.delivery === 'pending' && (!j.delivery_until || +j.delivery_until <= +now)) || (j.delivery === 'sending' && +j.delivery_until <= +now)));
             if (!j) return null;
             Object.assign(j, { delivery: 'sending', delivery_until: new Date(+now + 60000), delivery_attempts: j.delivery_attempts + 1 });
             return j;
         },
-        async delivered(id, success) { jobs.get(id).delivery = success ? 'sent' : 'pending'; }
+        async delivered(id, success, retryAt) {
+            const job = jobs.get(id);
+            job.delivery = success ? 'sent' : 'pending';
+            if (retryAt) job.delivery_until = retryAt;
+        }
     };
     const sends = [];
     const telegram = { async sendMessage(...args) { sends.push(args); } };
@@ -87,7 +92,7 @@ function fixture() {
     function ctx(text = '/muse iPhone 13 cũ tại TP.HCM', id = 42, type = 'private') {
         const replies = [];
         return { chat: { type, id: type === 'private' ? id : -100123 }, from: { id },
-            message: { text, message_id: 100, ...(type === 'private' ? {} : { message_thread_id: 9 }) }, replies,
+            message: { text, message_id: messageId++, ...(type === 'private' ? {} : { message_thread_id: 9 }) }, replies,
             async reply(...args) { replies.push(args); } };
     }
     return { bridge, config, jobs, sends, store, telegram, ctx, advance: ms => { clock += ms; } };
@@ -141,7 +146,7 @@ test('group results reply to the original message in the original topic without 
     await f.bridge.drain();
     assert.equal(f.sends[0][0], '-100123');
     assert.equal(f.sends[0][2].message_thread_id, 9);
-    assert.deepEqual(f.sends[0][2].reply_parameters, { message_id: 100, allow_sending_without_reply: true });
+    assert.deepEqual(f.sends[0][2].reply_parameters, { message_id: ctx.message.message_id, allow_sending_without_reply: true });
     const privateCtx = f.ctx('/batam_status', 99);
     await f.bridge.commands.status(privateCtx);
     assert.doesNotMatch(privateCtx.replies[0][0], /iPhone/);
@@ -183,16 +188,55 @@ test('private results and cancellation stay private even when the same user asks
     assert.equal(f.sends[0][2].message_thread_id, undefined);
 });
 
-test('concurrent requests share a 12-per-hour cap and greetings do not consume searches', async () => {
+test('everyone can enqueue beyond 12 per hour and greetings do not consume searches', async () => {
     const f = fixture();
     const greeting = f.ctx('xin chào', 99);
     await f.bridge.commands.search(greeting);
     assert.equal(f.jobs.size, 0);
     await Promise.all(Array.from({ length: 20 }, (_, i) => f.bridge.commands.search(f.ctx('tìm iPhone tại HCM', 100 + i))));
-    assert.equal(f.jobs.size, 12);
+    assert.equal(f.jobs.size, 20);
+    // One person can search again as soon as their previous job completes,
+    // even after more than 12 completed searches in the same hour.
+    for (let i = 0; i < 15; i++) {
+        await f.bridge.commands.search(f.ctx('tìm máy ảnh tại Huế', 999));
+        const pending = [...f.jobs.values()].find(j => j.owner === '999' && j.active);
+        pending.state = 'completed'; pending.active = false;
+    }
+    assert.equal(f.jobs.size, 35);
+});
+
+test('Telegram redelivery is idempotent even after the original result was completed', async () => {
+    const f = fixture();
+    const ctx = f.ctx('tìm máy ảnh tại Huế');
+    await f.bridge.commands.search(ctx);
+    const { job } = await f.bridge.claim();
+    await f.bridge.complete({ job_id: job.job_id, lease_token: job.lease_token, result });
+    await f.bridge.commands.search(ctx);
+    assert.equal(f.jobs.size, 1);
+    assert.match(ctx.replies.at(-1)[0], /nhận tin nhắn này trước đó/);
+});
+
+test('multiline detailed requests fit within 600 characters and invalid lengths are rejected', async () => {
+    const f = fixture();
+    const query = 'tìm iPhone 13\nTP.HCM\tdưới 6 triệu ' + 'cấu hình '.repeat(20);
+    await f.bridge.commands.search(f.ctx(query));
+    const job = [...f.jobs.values()][0];
+    assert.ok(job.query.length > 180);
+    assert.doesNotMatch(job.query, /[\n\t]/);
+    await f.bridge.commands.search(f.ctx('a'.repeat(601), 99));
+    assert.equal(f.jobs.size, 1);
+});
+
+test('multiple workers claim different jobs and expired requests notify their original chat', async () => {
+    const f = fixture();
+    for (let i = 0; i < 5; i++) await f.bridge.commands.search(f.ctx('tìm iPhone tại Huế', 100 + i));
+    const jobs = await Promise.all(Array.from({ length: 5 }, () => f.bridge.claim()));
+    assert.equal(new Set(jobs.map(j => j.job.job_id)).size, 5);
     f.advance(61 * 60000);
-    await f.bridge.commands.search(f.ctx('tìm iPhone tại HCM', 999));
-    assert.equal(f.jobs.size, 13);
+    assert.deepEqual(await f.bridge.claim(), { job: null });
+    for (let i = 0; i < 5; i++) await f.bridge.drain();
+    assert.equal(f.sends.length, 5);
+    assert.match(f.sends[0][1], /hết thời gian chờ/);
 });
 
 test('completion binds to lease, is idempotent and delivers only to the original requester', async () => {
@@ -235,11 +279,31 @@ test('stored result survives delivery failure and remains available through stat
     const { job } = await f.bridge.claim();
     await f.bridge.complete({ job_id: job.job_id, lease_token: job.lease_token, result });
     f.telegram.sendMessage = async () => { throw new Error('offline'); };
-    for (let i = 0; i < 5; i++) await f.bridge.drain();
+    for (let i = 0; i < 5; i++) { await f.bridge.drain(); f.advance(5 * 60000); }
     assert.equal([...f.jobs.values()][0].delivery_attempts, 3);
     const ctx = f.ctx('/muse_status');
     await f.bridge.commands.status(ctx);
     assert.match(ctx.replies[0][0], /iPhone 13/);
+});
+
+test('Telegram retry_after is respected and completion/delivery health track actual progress', async () => {
+    const f = fixture();
+    await f.bridge.commands.search(f.ctx());
+    const { job } = await f.bridge.claim();
+    await f.bridge.complete({ job_id: job.job_id, lease_token: job.lease_token, result });
+    assert.ok(f.bridge.health().last_completed_at);
+    assert.equal(f.bridge.health().last_delivered_at, null);
+    let attempts = 0;
+    f.telegram.sendMessage = async () => {
+        if (++attempts === 1) throw { response: { parameters: { retry_after: 60 } } };
+    };
+    await f.bridge.drain();
+    await f.bridge.drain();
+    f.advance(59000); await f.bridge.drain();
+    assert.equal(attempts, 1);
+    f.advance(1000); await f.bridge.drain();
+    assert.equal(attempts, 2);
+    assert.ok(f.bridge.health().last_delivered_at);
 });
 
 test('real MCP HTTP client negotiates and calls only authenticated, schema-validated tools', async t => {

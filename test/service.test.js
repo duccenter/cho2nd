@@ -91,7 +91,7 @@ test('enabled Muse attaches private commands and MCP while preserving the authen
     assert.equal(f.calls.schedules.length, 1);
     const health = await (await f.request('/health')).json();
     assert.equal(health.bot, 'webhook');
-    assert.deepEqual(health.muse, { enabled: true, last_claim_at: null });
+    assert.deepEqual(health.muse, { enabled: true, last_claim_at: null, last_completed_at: null, last_delivered_at: null });
     assert.equal((await f.request('/muse/mcp', { method: 'POST' })).status, 401);
 });
 
