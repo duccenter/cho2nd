@@ -3,7 +3,28 @@ const assert = require('node:assert/strict');
 const express = require('express');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
-const { readConfig, createMuseBridge, mountMuseMcp, resultSchema } = require('../src/muse');
+const { readConfig, createMongoStore, createMuseBridge, mountMuseMcp, resultSchema } = require('../src/muse');
+
+test('real Mongoose queue model defers collection and indexes until after connection', async () => {
+    const mongoose = require('mongoose');
+    const { MuseJob } = require('../src/database');
+    const isolated = new mongoose.Mongoose();
+    isolated.set('bufferCommands', false);
+    const Job = isolated.model('MuseQueueInitializationTest', MuseJob.schema.clone());
+    // Defining the model while disconnected must not cache a rejected eager init.
+    await Job.init();
+    const calls = [];
+    isolated.connection.db = {
+        async createCollection(name) { calls.push(['collection', name]); return {}; },
+        collection() { return { async createIndex(keys, options) { calls.push(['index', keys, options]); return 'index'; } }; }
+    };
+    isolated.connection.readyState = 1;
+    await createMongoStore(Job).init();
+    assert.equal(calls[0][0], 'collection');
+    assert.equal(calls.filter(c => c[0] === 'index').length, 3);
+    assert.ok(calls.some(c => c[2]?.unique && c[2]?.partialFilterExpression?.active === true));
+    assert.ok(calls.some(c => c[2]?.expireAfterSeconds === 0));
+});
 
 const key = 'ab'.repeat(32);
 const result = { summary: 'Đã đọc một tin rao; chưa xác minh người bán.', products: [{

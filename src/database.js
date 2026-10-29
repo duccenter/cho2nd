@@ -56,7 +56,7 @@ const MuseJobSchema = new mongoose.Schema({
     created_at: { type: Date, required: true },
     deadline: { type: Date, required: true },
     expires_at: { type: Date, required: true }
-});
+}, { autoCreate: false, autoIndex: false });
 MuseJobSchema.index({ owner: 1 }, { unique: true, partialFilterExpression: { active: true } });
 MuseJobSchema.index({ expires_at: 1 }, { expireAfterSeconds: 0 });
 MuseJobSchema.index({ state: 1, active: 1, created_at: 1 });
