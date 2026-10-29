@@ -28,6 +28,61 @@ function loadHandlers(env = {}, database = {}) {
     return { commands, actions, events };
 }
 
+test('a Telegram mention invokes Batam only for this bot, without forwarding replies or other mentions', async () => {
+    const { events } = loadHandlers();
+    const searches = [];
+    const handler = events.get('message');
+    const ctx = text => ({ chat: { type: 'supergroup', id: -1001 }, from: { id: 42 }, me: 'batam_2nd_bot',
+        message: { text, message_thread_id: 9 },
+        museBridge: { commands: { search: async (_ctx, query) => searches.push(query) } } });
+    const mentioned = ctx('@BATAM_2ND_BOT tìm iPhone cũ tại Huế');
+    mentioned.message.entities = [{ type: 'mention', offset: 0, length: 14 }];
+    await handler(mentioned);
+    assert.deepEqual(searches, ['tìm iPhone cũ tại Huế']);
+    const other = ctx('@other_bot tìm máy ảnh');
+    other.message.entities = [{ type: 'mention', offset: 0, length: 10 }];
+    await handler(other);
+    const ordinary = ctx('Tôi cần máy ảnh');
+    ordinary.message.reply_to_message = { from: { is_bot: true } };
+    await handler(ordinary);
+    assert.equal(searches.length, 1);
+});
+
+test('private text starts a search but active draft answers and slash commands keep their original route', async () => {
+    let user = null;
+    const updates = [];
+    const { events, commands } = loadHandlers({}, { User: {
+        findOne: async () => user,
+        updateOne: async (...args) => updates.push(args)
+    } });
+    const searches = [];
+    const replies = [];
+    const ctx = { chat: { type: 'private', id: 42 }, from: { id: 42 }, message: { text: 'tìm iPhone cũ ở HCM' },
+        museBridge: { commands: { search: async (_ctx, text) => searches.push(text) } },
+        reply: async text => replies.push(text) };
+    await events.get('message')(ctx);
+    assert.deepEqual(searches, ['tìm iPhone cũ ở HCM']);
+    user = { _id: 'user', post_builder_state: 'waiting_name' };
+    ctx.message.text = 'iPhone của tôi';
+    await events.get('message')(ctx);
+    assert.equal(updates.length, 1);
+    assert.equal(searches.length, 1);
+    ctx.message.text = '/unknown';
+    await events.get('message')(ctx);
+    assert.equal(searches.length, 1);
+    assert.equal(commands.has('batam'), true);
+    assert.equal(commands.has('batam_status'), true);
+    assert.equal(commands.has('muse'), true);
+});
+
+test('a draft lookup failure never forwards private draft text to the agent', async () => {
+    const { events } = loadHandlers({}, { User: { findOne: async () => { throw new Error('offline'); } } });
+    let searched = false;
+    await events.get('message')({ chat: { type: 'private' }, from: { id: 42 }, message: { text: 'draft answer' },
+        museBridge: { commands: { search: async () => { searched = true; } } }, reply: async () => {} });
+    assert.equal(searched, false);
+});
+
 for (const env of [{}, { ENABLE_JOIN_CAPTCHA: 'false' }]) {
     test(`new members are welcomed in General without muting (captcha=${env.ENABLE_JOIN_CAPTCHA || 'unset'})`, async () => {
         const { events } = loadHandlers(env);

@@ -10,11 +10,11 @@ if (!process.env.BOT_TOKEN) {
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const BAD_WORDS = ['đm', 'vcl', 'địt', 'lồn', 'cặc', 'phò', 'đĩ', 'chó đẻ'];
 
-// Register before the generic message/form handler. Disabled unless the service
-// supplies a configured bridge; ordinary private messages are never forwarded.
-for (const [name, handler] of [['muse', 'search'], ['muse_status', 'status'], ['muse_cancel', 'cancel']]) {
+// Old /muse commands remain aliases for requests already in flight.
+for (const [name, handler] of [['batam', 'search'], ['batam_status', 'status'], ['batam_cancel', 'cancel'],
+    ['muse', 'search'], ['muse_status', 'status'], ['muse_cancel', 'cancel']]) {
     bot.command(name, async ctx => {
-        if (!ctx.museBridge) return ctx.reply('Tìm kiếm Muse chưa được bật.');
+        if (!ctx.museBridge) return ctx.reply('Tìm kiếm Batam chưa được bật.');
         return ctx.museBridge.commands[handler](ctx);
     });
 }
@@ -55,7 +55,7 @@ bot.command(['start', 'help', 'menu'], async (ctx) => {
     }
 
     await ctx.reply(
-        'Chào mừng đến với hệ thống Quản lý Chợ 2nd! Bạn cần giúp gì?',
+        'Chào mừng đến với hệ thống Quản lý Chợ 2nd! Bạn cần giúp gì?\n\n🔎 Gõ sản phẩm, khu vực và ngân sách để Batam tìm trên Facebook Marketplace. Trong nhóm, gọi @batam_2nd_bot kèm nhu cầu.',
         Markup.inlineKeyboard([
             [Markup.button.callback('👕 Hướng dẫn Đăng bài', 'huong_dan')],
             [Markup.button.callback('🔔 Săn đồ', 'san_do'), Markup.button.callback('📋 Quản lý đồ săn', 'quanly_btn')],
@@ -507,6 +507,21 @@ bot.on('message', async (ctx) => {
     const text = (msg.text || msg.caption || '');
     const isPrivate = ctx.chat.type === 'private';
 
+    // Only an explicit mention of this bot starts a search in a group.
+    // Use Telegram entities: quoted replies, similar names and normal group
+    // conversation must not be forwarded to the search agent.
+    if (!isPrivate && msg.text && !msg.text.startsWith('/') && ctx.museBridge && ctx.me) {
+        const mentions = (msg.entities || []).filter(entity => entity.type === 'mention' &&
+            msg.text.slice(entity.offset, entity.offset + entity.length).toLowerCase() === `@${ctx.me.toLowerCase()}`);
+        if (mentions.length) {
+            let query = msg.text;
+            for (const entity of [...mentions].sort((a, b) => b.offset - a.offset)) {
+                query = query.slice(0, entity.offset) + query.slice(entity.offset + entity.length);
+            }
+            return ctx.museBridge.commands.search(ctx, query.trim());
+        }
+    }
+
     // XỬ LÝ INBOX (POST BUILDER)
     if (isPrivate && msg.text && !msg.text.startsWith('/')) {
         try {
@@ -549,7 +564,13 @@ bot.on('message', async (ctx) => {
                     return ctx.reply(finalPost, { parse_mode: 'Markdown' });
                 }
             }
-        } catch (err) {}
+        } catch (err) {
+            // Do not forward a possible draft answer when its form state
+            // could not be read from MongoDB.
+            console.error('Không đọc được trạng thái tạo bài:', describeError(err));
+            return ctx.reply('Chưa đọc được trạng thái tạo bài. Vui lòng thử lại sau.');
+        }
+        if (ctx.museBridge) return ctx.museBridge.commands.search(ctx, msg.text);
     }
 
     // Bỏ qua nếu là các message hệ thống không có media/text trong nhóm

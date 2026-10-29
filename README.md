@@ -57,9 +57,14 @@ trạng thái này không được lưu qua lần khởi động lại.
 
 ## Tìm sản phẩm qua Muse (thử nghiệm)
 
-Lệnh `/muse <sản phẩm, khu vực, ngân sách>` tạo công việc riêng cho ID được phép.
-Muse lấy việc qua MCP, tìm Marketplace và trả liên kết; Batam gửi kết quả riêng.
-`/muse_status` xem lượt gần nhất, `/muse_cancel` hủy lượt đang chờ.
+Trong Topic của nhóm `GROUP_CHAT_ID`, gõ `@batam_2nd_bot tìm iPhone 13 cũ tại TP.HCM dưới 6 triệu`.
+Chat riêng với bot có thể gõ thẳng sản phẩm, khu vực, ngân sách; mọi người đều dùng được.
+Muse lấy việc qua MCP, tìm Marketplace và trả liên kết; Batam trả đúng chat/Topic
+đã hỏi, gắn với tin nhắn gốc. Sảnh Chung không nhận yêu cầu tìm kiếm.
+`/batam` là cách gọi phụ; `/batam_status` xem lượt gần nhất trong chat/Topic hiện tại,
+`/batam_cancel` hủy lượt đang chờ tại đó. Các lệnh `/muse*` cũ vẫn là alias.
+Mỗi người có một lượt chờ; tối đa 12 lượt chung mỗi giờ để bảo vệ gói Free.
+Chat nhóm thông thường và nội dung đang điền form đăng bán không gửi cho Muse.
 Mặc định tắt (`MUSE_ENABLED=false`); phải kết nối custom MCP và thử lịch Muse
 trước khi công bố dùng được. Các lệnh nhóm và webhook hiện tại vẫn hoạt động.
 Xem [thiết lập và giới hạn](docs/muse-agent.md). Không lưu cookie/token vào GitHub.

@@ -9,13 +9,19 @@ kiểm tra sau khi kết nối. Cài mã không đồng nghĩa đã hoàn tất 
 
 Bot vẫn giữ webhook, chào thành viên, kiểm duyệt, săn đồ và bản tin hiện tại.
 Không chuyển toàn bộ quyền bot sang Muse. Không dùng cookie trong mã nguồn.
-Chỉ lệnh `/muse` trong tin nhắn riêng từ ID được cho phép mới tạo công việc.
-Tin nhắn thông thường, dữ liệu nhóm, tên và Telegram ID không được gửi cho Muse.
+Trong nhóm GROUP_CHAT_ID, chỉ tin nhắn gắn mention đúng username của bot hoặc
+lệnh `/batam` mới tạo công việc. Sảnh Chung không nhận yêu cầu. Chat riêng có thể
+gõ thẳng nhu cầu; mọi người dùng được. Bot không chuyển nội dung đang điền form
+đăng bán hay hội thoại nhóm thông thường. Chỉ truy vấn tìm kiếm gửi cho Muse;
+tên, Telegram ID, người nhận, Topic và lịch sử chat vẫn giữ ở Batam.
+Kết quả trả vào đúng chat/Topic đã hỏi, reply tin gốc (vẫn gửi nếu tin gốc đã xóa).
+Không tự chuyển kết quả sang một nơi khác nếu Telegram không gửi được.
 
 ## Cấu hình Render (giữ Free)
 
 - `MUSE_ENABLED=true`
-- `MUSE_ALLOWED_USER_IDS`: ID số được phép dùng thử; bắt đầu bằng chủ bot.
+- `GROUP_CHAT_ID`: chỉ nhận yêu cầu nhóm trong các Topic (trừ Sảnh Chung) của nhóm này.
+  `MUSE_ALLOWED_USER_IDS` cũ không còn là danh sách giới hạn người dùng.
 - `MUSE_BRIDGE_KEY`: khóa ngẫu nhiên 16 hoặc 32 byte (32 hoặc 64 ký tự hex).
   Khuyên dùng 64 ký tự; hỗ trợ khóa 128 bit từ nút Generate của Render.
   Chỉ lưu trong Render environment và kho thông tin đăng nhập an toàn của Muse.
@@ -34,7 +40,7 @@ Auth: Bearer qua header Authorization. Chỉ cho phép đúng hai công cụ:
    khi trống. Dữ liệu gồm `job_id`, `lease_token`, `query`, `lease_until`,
    `max_results=3`, `source=facebook_marketplace` và hướng dẫn giới hạn tác vụ.
 2. `complete_search_job({job_id, lease_token, result})`: lưu kết quả đúng lease.
-   Không có tham số người nhận. Bot tự gửi riêng về người đã tạo công việc.
+   Không có tham số người nhận. Bot tự gửi đúng chat/Topic của công việc.
 
 `result` gồm `summary` (1–500 ký tự) và `products` (tối đa3 phần tử). Mỗi sản
 phẩm phải có `title` (1–160), `url`, `price` (0–60), `location` (0–100),
@@ -61,20 +67,23 @@ Tác vụ interval mỗi5 phút, không phải cam kết độ trễ. Nội dung
 > cụ yêu cầu phê duyệt hoặc kết nối lại, dừng và báo chủ tài khoản; không bỏ qua.
 > Không gửi thông báo chat Muse khi queue trống hoặc công việc thành công.
 
-Trước khi lưu lịch, thử thủ công một công việc do chủ bot gửi `/muse iPhone13
+Trước khi lưu lịch, thử thủ công một công việc do chủ bot gửi `/batam iPhone13
 cũ tại TP.HCM dưới6 triệu`. Xác nhận cả hai công cụ gọi thật, kết quả tới đúng
 Telegram riêng và bước ghi MCP không bị treo chờ duyệt ở lượt chạy nền.
 Nếu cần duyệt từng lần, không gọi là agent tự động; giữ chế độ thử nghiệm.
 
 ## Vận hành và giới hạn
 
-Mỗi tài khoản tối đa12 công việc/giờ, một công việc đang chờ. Job hết hạn sau
+Toàn bộ bot tối đa12 công việc/giờ (rolling window), mỗi tài khoản một công việc
+đang chờ; kiểm tra và nhận việc tuần tự trong tiến trình Render hiện tại. Job hết hạn sau
 1 giờ; dữ liệu tự xóa bằng Mongo TTL sau24 giờ (Mongo có thể dọn trễ).
 Lease được lấy lại sau15 phút, tối đa3 lần. Kết quả của lease cũ, công việc
 đã hủy hoặc hết hạn bị từ chối. Ghi kết quả lặp cùng lease không gửi lại.
 Gửi Telegram tự thử lại tối đa3 lần. Nếu kết nối mất ngay sau khi Telegram nhận
 nhưng trước khi ghi nhận gửi thành công, có thể xuất hiện tin trùng.
-`/muse_status` đọc lại kết quả lưu; `/muse_cancel` hủy công việc đang chờ.
+`/batam_status` đọc lại kết quả lưu; `/batam_cancel` hủy công việc đang chờ.
+Hai lệnh chỉ tác động công việc của chính người gửi tại chat/Topic hiện tại,
+không lấy kết quả chat riêng để đăng vào nhóm. `/muse*` cũ giữ làm alias.
 
 `/health` vẫn kiểm tra webhook/Mongo. Khi bật có thêm
 `muse.enabled` và `muse.last_claim_at`; đây chỉ là thời điểm lấy việc trong

@@ -43,6 +43,9 @@ const Scammer = mongoose.model('Scammer', ScammerSchema);
 const MuseJobSchema = new mongoose.Schema({
     _id: { type: String, required: true },
     owner: { type: String, required: true },
+    chat_id: String,
+    thread_id: Number,
+    reply_to_message_id: Number,
     query: { type: String, required: true, maxlength: 180 },
     active: { type: Boolean, required: true },
     state: { type: String, enum: ['pending', 'leased', 'completed', 'cancelled', 'expired'], required: true },
