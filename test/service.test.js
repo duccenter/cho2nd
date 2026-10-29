@@ -14,6 +14,7 @@ function fixture(overrides = {}) {
         async disconnectDB() { connected = false; calls.disconnected++; }
     };
     const bot = {
+        context: {},
         telegram: {
             async getMe() { return { id: 1, username: 'test_bot' }; },
             async setWebhook(...args) { calls.webhooks.push(args); },
@@ -74,6 +75,24 @@ test('polling registers the 10h job without waiting for polling to finish', asyn
     assert.deepEqual(await (await f.request('/health')).json(), { status: 'ok', bot: 'polling', database: 'connected' });
     f.loseDatabase();
     assert.equal((await f.request('/health')).status, 503);
+});
+
+test('enabled Muse attaches private commands and MCP while preserving the authenticated Telegram receiver', async t => {
+    let initialized = false;
+    const f = fixture({
+        env: { MUSE_ENABLED: 'true', MUSE_ALLOWED_USER_IDS: '42', MUSE_BRIDGE_KEY: 'ab'.repeat(32), RENDER_EXTERNAL_URL: 'https://test.onrender.com' },
+        museStore: { async init() { initialized = true; }, async takeDelivery() { return null; } }
+    });
+    t.after(() => f.service.stop());
+    await f.service.start();
+    assert.equal(initialized, true);
+    assert.equal(typeof f.bot.context.museBridge.commands.search, 'function');
+    assert.equal(f.calls.webhooks.length, 1);
+    assert.equal(f.calls.schedules.length, 1);
+    const health = await (await f.request('/health')).json();
+    assert.equal(health.bot, 'webhook');
+    assert.deepEqual(health.muse, { enabled: true, last_claim_at: null });
+    assert.equal((await f.request('/muse/mcp', { method: 'POST' })).status, 401);
 });
 
 test('Render registers an authenticated webhook and rejects forged requests', async t => {

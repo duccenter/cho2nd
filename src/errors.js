@@ -1,6 +1,6 @@
 function describeError(error, env = process.env) {
     let message = String(error.description || error.message || error);
-    for (const key of ['BOT_TOKEN', 'MONGO_URI', 'CRON_SECRET']) {
+    for (const key of ['BOT_TOKEN', 'MONGO_URI', 'CRON_SECRET', 'MUSE_BRIDGE_KEY']) {
         if (env[key]) message = message.replaceAll(env[key], '[redacted]');
     }
     return message

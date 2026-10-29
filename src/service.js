@@ -2,6 +2,7 @@ const express = require('express');
 const cron = require('node-cron');
 const { createHmac, timingSafeEqual } = require('node:crypto');
 const { describeError } = require('./errors');
+const { readConfig, createMongoStore, createMuseBridge, mountMuseMcp } = require('./muse');
 
 const ALLOWED_UPDATES = ['message', 'callback_query', 'chat_member'];
 const WEBHOOK_PATH = '/telegram/webhook';
@@ -10,6 +11,7 @@ function createService(options = {}) {
     const env = options.env || process.env;
     if (!env.BOT_TOKEN) throw new Error('Thiếu BOT_TOKEN.');
     if (!env.MONGO_URI) throw new Error('Thiếu MONGO_URI. Cần MongoDB để vận hành bot.');
+    const museConfig = readConfig(env);
 
     const publicUrl = env.WEBHOOK_URL || env.RENDER_EXTERNAL_URL;
     if (publicUrl && (new URL(publicUrl).protocol !== 'https:' || new URL(publicUrl).pathname !== '/')) {
@@ -35,6 +37,11 @@ function createService(options = {}) {
     let polling;
     let sendingNews = false;
     let lastNewsDate;
+    const muse = museConfig ? createMuseBridge({
+        config: museConfig, store: options.museStore || createMongoStore(db.MuseJob),
+        telegram: bot.telegram, logger
+    }) : null;
+    if (muse) bot.context.museBridge = muse;
 
     app.disable('x-powered-by');
     const health = (_req, res) => {
@@ -42,11 +49,13 @@ function createService(options = {}) {
         res.status(ready && connected ? 200 : 503).json({
             status: ready && connected ? 'ok' : 'unavailable',
             bot: ready ? mode : 'stopped',
-            database: connected ? 'connected' : 'disconnected'
+            database: connected ? 'connected' : 'disconnected',
+            ...(muse ? { muse: muse.health() } : {})
         });
     };
     app.get('/', health);
     app.get('/health', health);
+    if (muse) mountMuseMcp(app, muse, museConfig, () => ready && db.isConnected());
 
     if (publicUrl) {
         const callback = bot.webhookCallback(WEBHOOK_PATH, { secretToken });
@@ -112,6 +121,7 @@ function createService(options = {}) {
         if (stopping) return;
         stopping = true;
         ready = false;
+        if (muse) muse.stop();
         if (task) task.destroy();
         if (mode === 'polling' && polling) {
             try { bot.stop('shutdown'); } catch (error) {
@@ -138,6 +148,7 @@ function createService(options = {}) {
         logger.log(`Web server đang chạy trên port ${server.address().port}`);
         try {
             await db.connectDB();
+            if (muse) await muse.start();
             if (stopping) return;
             bot.botInfo = await bot.telegram.getMe();
             if (stopping) return;
