@@ -73,6 +73,10 @@ test('Muse is disabled by default and enabled mode fails closed without strong k
     assert.equal(readConfig({}), null);
     assert.throws(() => readConfig({ MUSE_ENABLED: 'true' }), /USER_IDS/);
     assert.throws(() => readConfig({ MUSE_ENABLED: 'true', MUSE_ALLOWED_USER_IDS: '42', MUSE_BRIDGE_KEY: 'short' }), /BRIDGE_KEY/);
+    assert.equal(readConfig({ MUSE_ENABLED: 'true', MUSE_ALLOWED_USER_IDS: '42', MUSE_BRIDGE_KEY: 'ab'.repeat(16) }).key.length, 32);
+    for (const invalid of ['a'.repeat(31), 'a'.repeat(33), 'g'.repeat(32)]) {
+        assert.throws(() => readConfig({ MUSE_ENABLED: 'true', MUSE_ALLOWED_USER_IDS: '42', MUSE_BRIDGE_KEY: invalid }), /BRIDGE_KEY/);
+    }
 });
 
 test('only allowed private users enqueue, normal data and arbitrary recipients cannot be submitted', async () => {

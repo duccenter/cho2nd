@@ -28,8 +28,10 @@ function readConfig(env) {
     if (!owners.length || owners.some(x => !/^[1-9]\d*$/.test(x))) {
         throw new Error('MUSE_ALLOWED_USER_IDS phải có ID người dùng Telegram được phép thử.');
     }
-    if (!/^[a-f0-9]{64}$/.test(env.MUSE_BRIDGE_KEY || '')) {
-        throw new Error('MUSE_BRIDGE_KEY phải là 32 byte ngẫu nhiên mã hóa hex.');
+    // Render's Generate button creates a 16-byte hex secret. Also accept the
+    // recommended 32-byte secret; both must be generated randomly.
+    if (!/^(?:[a-f0-9]{32}|[a-f0-9]{64})$/.test(env.MUSE_BRIDGE_KEY || '')) {
+        throw new Error('MUSE_BRIDGE_KEY phải là 16 hoặc 32 byte ngẫu nhiên mã hóa hex (32 hoặc 64 ký tự).');
     }
     return { owners, key: env.MUSE_BRIDGE_KEY };
 }
