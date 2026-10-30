@@ -65,12 +65,17 @@ công khai, viết/biên tập/dịch nội dung và tìm sản phẩm. Câu tr�
 tham khảo khi sử dụng web; kết quả sản phẩm vẫn có giá và link Marketplace.
 Batam trả đúng chat/Topic đã hỏi, reply tin gốc. Sảnh Chung không nhận yêu cầu.
 `/batam` là cách gọi phụ; `/batam_status` xem lượt gần nhất trong chat/Topic hiện tại,
-`/batam_cancel` hủy lượt đang chờ tại đó. Các lệnh `/muse*` cũ vẫn là alias.
+`/batam_cancel` hủy lượt đang chờ tại đó; `/batam_new` bắt đầu luồng mới cho chính
+người gửi tại chat/Topic đó. Các lệnh `/muse*` cũ vẫn là alias.
 Không áp hạn mức số lượt theo giờ; mỗi người có một lượt đang chờ để tránh gửi
 trùng. Gửi yêu cầu tiếp theo sau khi lượt trước hoàn tất hoặc hủy lượt trước.
 Nhu cầu tối đa 2000 ký tự, có thể xuống dòng và gửi link HTTPS công khai không kèm
-thông tin đăng nhập. Mỗi câu hỏi độc lập; không tự chuyển lịch sử hoặc tin được reply
-cho Muse. Câu trả lời chung tối đa2500 ký tự, kèm tối đa3 nguồn thực sự đã đọc.
+thông tin đăng nhập. Cùng người trong cùng chat/Topic tiếp tục ngữ cảnh khi quay lại
+sau vài ngày: MongoDB lưu tối đa8 lượt Batam hoàn tất, hết hạn sau30 ngày không hoạt
+động, độc lập với hàng đợi24 giờ và việc bot restart. Muse nhận tối đa12000 ký tự
+ngữ cảnh gần nhất, kèm ngày giờ; không nhận lịch sử Telegram thông thường, tin được
+reply hay hội thoại của người khác. Bắt đầu ghi nhớ từ khi tính năng được bật.
+Câu trả lời chung tối đa2500 ký tự, kèm tối đa3 nguồn thực sự đã đọc.
 Lịch Muse được cấu hình mỗi phút, xử lý tiếp tối đa 3 yêu cầu trong một lượt
 300 giây khi còn đủ thời gian. Lịch có thể trễ; số token không bảo đảm phản hồi tức thì.
 Yêu cầu hết thời gian chờ sẽ được báo lại đúng nơi hỏi; Telegram giao chậm được thử lại có chờ.
