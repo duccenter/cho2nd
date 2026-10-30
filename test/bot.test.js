@@ -76,6 +76,8 @@ test('private text starts a search but active draft answers and slash commands k
     assert.equal(searches.length, 1);
     assert.equal(commands.has('batam'), true);
     assert.equal(commands.has('batam_status'), true);
+    assert.equal(commands.has('batam_new'), true);
+    assert.equal(commands.has('muse_new'), true);
     assert.equal(commands.has('muse'), true);
 });
 

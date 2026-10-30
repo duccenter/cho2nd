@@ -1,5 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
 const express = require('express');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
@@ -7,21 +8,24 @@ const { readConfig, createMongoStore, createMuseBridge, mountMuseMcp, resultSche
 
 test('real Mongoose queue model defers collection and indexes until after connection', async () => {
     const mongoose = require('mongoose');
-    const { MuseJob } = require('../src/database');
+    const { MuseJob, MuseThread } = require('../src/database');
     const isolated = new mongoose.Mongoose();
     isolated.set('bufferCommands', false);
     const Job = isolated.model('MuseQueueInitializationTest', MuseJob.schema.clone());
+    const Thread = isolated.model('MuseThreadInitializationTest', MuseThread.schema.clone());
     // Defining the model while disconnected must not cache a rejected eager init.
     await Job.init();
+    await Thread.init();
     const calls = [];
     isolated.connection.db = {
         async createCollection(name) { calls.push(['collection', name]); return {}; },
         collection() { return { async createIndex(keys, options) { calls.push(['index', keys, options]); return 'index'; } }; }
     };
     isolated.connection.readyState = 1;
-    await createMongoStore(Job).init();
+    await createMongoStore(Job, Thread).init();
     assert.equal(calls[0][0], 'collection');
-    assert.equal(calls.filter(c => c[0] === 'index').length, 4);
+    assert.equal(calls.filter(c => c[0] === 'collection').length, 2);
+    assert.equal(calls.filter(c => c[0] === 'index').length, 5);
     assert.ok(calls.some(c => c[2]?.unique && c[2]?.partialFilterExpression?.active === true));
     assert.ok(calls.some(c => c[2]?.expireAfterSeconds === 0));
 });
@@ -35,10 +39,33 @@ const result = { summary: 'Đã đọc một tin rao; chưa xác minh người b
 // A store port keeps queue tests independent of a live database or Telegram.
 function fixture() {
     const jobs = new Map();
+    const threads = new Map();
     let clock = Date.now();
     let messageId = 99;
     const store = {
         async init() {},
+        async resetThread(key, now) {
+            const thread = { session_id: randomUUID(), sequence: 0, remembered_sequence: 0, turns: [],
+                expires_at: new Date(+now + 30 * 86400000) };
+            threads.set(key, thread);
+            return thread;
+        },
+        async getThread(key, now) {
+            let thread = threads.get(key);
+            if (!thread || +thread.expires_at <= +now) thread = await store.resetThread(key, now);
+            thread.sequence++;
+            thread.expires_at = new Date(+now + 30 * 86400000);
+            return thread;
+        },
+        async remember(job, now) {
+            const thread = threads.get(job.conversation_key);
+            if (!thread || thread.session_id !== job.conversation_id || +thread.expires_at <= +now ||
+                thread.remembered_sequence >= job.conversation_sequence) return;
+            thread.turns.push({ job_id: job._id, user: job.query, assistant: formatResult(job.result), at: now });
+            thread.turns = thread.turns.slice(-8);
+            thread.remembered_sequence = job.conversation_sequence;
+            thread.expires_at = new Date(+now + 30 * 86400000);
+        },
         async recover(now) {
             for (const j of jobs.values()) if (j.active && (+j.deadline <= +now ||
                 (j.state === 'leased' && +j.lease_until <= +now && j.attempts >= 3))) {
@@ -88,14 +115,15 @@ function fixture() {
     const sameScope = (j, owner, route) => j.owner === owner &&
         (j.chat_id || j.owner) === route.chat_id && j.thread_id === route.thread_id;
     const config = readConfig({ MUSE_ENABLED: 'true', GROUP_CHAT_ID: '-100123', MUSE_BRIDGE_KEY: key });
-    const bridge = createMuseBridge({ config, store, telegram, logger: { error() {} }, now: () => new Date(clock) });
+    const restart = () => createMuseBridge({ config, store, telegram, logger: { error() {} }, now: () => new Date(clock) });
+    const bridge = restart();
     function ctx(text = '/muse iPhone 13 cũ tại TP.HCM', id = 42, type = 'private') {
         const replies = [];
         return { chat: { type, id: type === 'private' ? id : -100123 }, from: { id },
             message: { text, message_id: messageId++, ...(type === 'private' ? {} : { message_thread_id: 9 }) }, replies,
             async reply(...args) { replies.push(args); } };
     }
-    return { bridge, config, jobs, sends, store, telegram, ctx, advance: ms => { clock += ms; } };
+    return { bridge, restart, config, jobs, threads, sends, store, telegram, ctx, advance: ms => { clock += ms; } };
 }
 
 test('search is disabled by default and enabled mode requires a strong key and valid group ID', () => {
@@ -403,4 +431,136 @@ test('real MCP HTTP client negotiates and calls only authenticated, schema-valid
     await f.bridge.drain();
     assert.equal(f.sends[1][0], '99');
     assert.match(f.sends[1][1], /Hello/);
+    await f.bridge.commands.search(f.ctx('Còn tin rao lúc nãy?'));
+    const followup = JSON.parse((await client.callTool({ name: 'claim_search_job', arguments: {} })).content[0].text);
+    assert.equal(followup.job.history.length, 1);
+    assert.match(followup.job.history[0].assistant, /iPhone 13/);
+    assert.equal(Object.hasOwn(followup.job.history[0], 'job_id'), false);
+});
+
+async function exchange(f, ctx, answer = 'Đã ghi nhận.') {
+    await f.bridge.commands.search(ctx);
+    const { job } = await f.bridge.claim();
+    assert.ok(job);
+    await f.bridge.complete({ job_id: job.job_id, lease_token: job.lease_token, result: { answer, sources: [] } });
+    await f.bridge.drain();
+    return job;
+}
+
+test('conversation survives three days, process restart and removal of the 24-hour queue', async () => {
+    const f = fixture();
+    await exchange(f, f.ctx('Ngân sách 7 triệu, ưu tiên gọn nhẹ.'), 'Bạn cần laptop gọn nhẹ trong 7 triệu.');
+    f.advance(3 * 86400000);
+    f.jobs.clear();
+    f.bridge = f.restart();
+    await f.bridge.commands.search(f.ctx('Ngân sách tôi nói là bao nhiêu?'));
+    const { job } = await f.bridge.claim();
+    assert.equal(job.history.length, 1);
+    assert.equal(job.history[0].user, 'Ngân sách 7 triệu, ưu tiên gọn nhẹ.');
+    assert.match(job.history[0].assistant, /7 triệu/);
+    assert.equal(Date.now() - Date.parse(job.history[0].at) < 10000, true);
+    for (const field of ['owner', 'chat_id', 'thread_id', 'conversation_key', 'conversation_id', 'conversation_sequence']) {
+        assert.equal(Object.hasOwn(job, field), false);
+    }
+});
+
+test('history isolates people, private chats and each group topic', async () => {
+    const f = fixture();
+    await exchange(f, f.ctx('Ghi nhớ sở thích riêng của A.'), 'Sở thích A.');
+    const groupA = f.ctx('Ngữ cảnh nhóm A.', 42, 'supergroup');
+    assert.deepEqual((await exchange(f, groupA)).history, []);
+    const topicB = f.ctx('Topic khác.', 42, 'supergroup'); topicB.message.message_thread_id = 10;
+    assert.deepEqual((await exchange(f, topicB)).history, []);
+    assert.deepEqual((await exchange(f, f.ctx('Người khác hỏi.', 99))).history, []);
+    const back = await exchange(f, f.ctx('Tiếp tục nhóm A.', 42, 'supergroup'));
+    assert.deepEqual(back.history.map(t => t.user), ['Ngữ cảnh nhóm A.']);
+    const privateA = await exchange(f, f.ctx('Tiếp tục riêng A.'));
+    assert.deepEqual(privateA.history.map(t => t.user), ['Ghi nhớ sở thích riêng của A.']);
+});
+
+test('reset changes only current scope and a late completion cannot repopulate the old generation', async () => {
+    const f = fixture();
+    await exchange(f, f.ctx('Ngữ cảnh riêng.'));
+    await exchange(f, f.ctx('Ngữ cảnh nhóm.', 42, 'supergroup'));
+    await f.bridge.commands.search(f.ctx('Yêu cầu riêng còn đang xử lý.'));
+    const { job } = await f.bridge.claim();
+    await f.bridge.commands.newThread(f.ctx('/batam_new'));
+    await f.bridge.complete({ job_id: job.job_id, lease_token: job.lease_token, result: { answer: 'Kết quả cũ.', sources: [] } });
+    await f.bridge.drain();
+    assert.equal(f.sends.length, 3, 'late result still replies to its original query');
+    assert.deepEqual((await exchange(f, f.ctx('Câu hỏi mới.'))).history, []);
+    const group = await exchange(f, f.ctx('Câu hỏi nhóm tiếp.', 42, 'supergroup'));
+    assert.deepEqual(group.history.map(t => t.user), ['Ngữ cảnh nhóm.']);
+});
+
+test('30-day expiry is enforced even before Mongo TTL has deleted the document', async () => {
+    const f = fixture();
+    await exchange(f, f.ctx('Thông tin cũ.'));
+    const oldId = [...f.threads.values()][0].session_id;
+    f.advance(31 * 86400000);
+    f.jobs.clear();
+    assert.deepEqual((await exchange(f, f.ctx('Tôi quay lại.'))).history, []);
+    assert.notEqual([...f.threads.values()][0].session_id, oldId);
+});
+
+test('history is bounded and replaying an evicted completion never re-adds it', async () => {
+    const f = fixture();
+    const first = await exchange(f, f.ctx('Lượt 0'));
+    for (let i = 1; i <= 10; i++) await exchange(f, f.ctx(`Lượt ${i}`), `Trả lời ${i}`);
+    const thread = [...f.threads.values()][0];
+    assert.equal(thread.turns.length, 8);
+    const before = structuredClone(thread.turns);
+    await f.bridge.complete({ job_id: first.job_id, lease_token: first.lease_token, result });
+    assert.deepEqual(thread.turns, before);
+    for (let i = 0; i < 8; i++) await exchange(f, f.ctx('u'.repeat(2000)), 'a'.repeat(2500));
+    const bounded = await exchange(f, f.ctx('Tiếp theo'));
+    assert.ok(bounded.history.length > 0 && bounded.history.length <= 8);
+    assert.ok(bounded.history.reduce((n, t) => n + t.user.length + t.assistant.length, 0) <= 12000);
+    assert.equal(thread.turns.length, 8);
+});
+
+test('database context failures fail closed; completion memory retry is idempotent', async () => {
+    const f = fixture();
+    const getThread = f.store.getThread;
+    f.store.getThread = async () => { throw new Error('offline'); };
+    const ctx = f.ctx('Câu hỏi.');
+    await f.bridge.commands.search(ctx);
+    assert.equal(f.jobs.size, 0);
+    assert.match(ctx.replies[0][0], /Chưa đọc được ngữ cảnh/);
+    f.store.getThread = getThread;
+    await f.bridge.commands.search(f.ctx('Hỏi lại.'));
+    const { job } = await f.bridge.claim();
+    const remember = f.store.remember;
+    f.store.remember = async () => { throw new Error('offline'); };
+    const completion = { job_id: job.job_id, lease_token: job.lease_token, result: { answer: 'Trả lời.', sources: [] } };
+    await assert.rejects(f.bridge.complete(completion), /offline/);
+    f.store.remember = remember;
+    assert.equal((await f.bridge.complete(completion)).already_completed, true);
+    await f.bridge.drain();
+    assert.equal([...f.threads.values()][0].turns.length, 1);
+    assert.equal(f.sends.length, 1);
+});
+
+test('legacy queue jobs without conversation metadata still deliver', async () => {
+    const f = fixture();
+    await f.bridge.commands.search(f.ctx());
+    const raw = [...f.jobs.values()][0];
+    delete raw.conversation_key; delete raw.conversation_id; delete raw.history;
+    const { job } = await f.bridge.claim();
+    assert.deepEqual(job.history, []);
+    await f.bridge.complete({ job_id: job.job_id, lease_token: job.lease_token, result });
+    await f.bridge.drain();
+    assert.equal(f.sends.length, 1);
+});
+
+test('Mongo memory update rejects earlier sequences even after history eviction and requires current generation', async () => {
+    let captured;
+    const store = createMongoStore({}, { updateOne: async (filter, update) => { captured = { filter, update }; } });
+    const now = new Date();
+    await store.remember({ _id: 'job', conversation_key: 'scope', conversation_id: 'generation',
+        conversation_sequence: 12, query: 'Question', result: { answer: 'Answer', sources: [] } }, now);
+    assert.deepEqual(captured.filter, { _id: 'scope', session_id: 'generation', expires_at: { $gt: now },
+        remembered_sequence: { $lt: 12 } });
+    assert.equal(captured.update.$set.remembered_sequence, 12);
+    assert.equal(captured.update.$push.turns.$slice, -8);
 });

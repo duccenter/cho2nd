@@ -47,6 +47,14 @@ const MuseJobSchema = new mongoose.Schema({
     thread_id: Number,
     reply_to_message_id: Number,
     request_key: String,
+    conversation_key: String,
+    conversation_id: String,
+    conversation_sequence: Number,
+    history: { type: [new mongoose.Schema({
+        user: { type: String, maxlength: 2000 },
+        assistant: { type: String, maxlength: 4096 },
+        at: Date
+    }, { _id: false })], default: undefined },
     query: { type: String, required: true, maxlength: 2000 },
     active: { type: Boolean, required: true },
     state: { type: String, enum: ['pending', 'leased', 'completed', 'cancelled', 'expired'], required: true },
@@ -67,7 +75,27 @@ MuseJobSchema.index({ state: 1, active: 1, created_at: 1 });
 MuseJobSchema.index({ request_key: 1 }, { unique: true, partialFilterExpression: { request_key: { $type: 'string' } } });
 const MuseJob = mongoose.model('MuseJob', MuseJobSchema);
 
+// Only exchanges with Batam are retained, separately from the 24-hour queue.
+// _id is a local hash of owner/chat/topic; it is never sent to Muse.
+const MuseThreadSchema = new mongoose.Schema({
+    _id: { type: String, required: true },
+    session_id: { type: String, required: true },
+    sequence: { type: Number, default: 0 },
+    remembered_sequence: { type: Number, default: 0 },
+    turns: { type: [new mongoose.Schema({
+        job_id: { type: String, required: true },
+        user: { type: String, required: true, maxlength: 2000 },
+        assistant: { type: String, required: true, maxlength: 4096 },
+        at: { type: Date, required: true }
+    }, { _id: false })], default: [] },
+    created_at: { type: Date, required: true },
+    updated_at: { type: Date, required: true },
+    expires_at: { type: Date, required: true }
+}, { autoCreate: false, autoIndex: false });
+MuseThreadSchema.index({ expires_at: 1 }, { expireAfterSeconds: 0 });
+const MuseThread = mongoose.model('MuseThread', MuseThreadSchema);
+
 const isConnected = () => mongoose.connection.readyState === 1;
 const disconnectDB = () => mongoose.disconnect();
 
-module.exports = { connectDB, disconnectDB, isConnected, User, Subscription, Scammer, MuseJob };
+module.exports = { connectDB, disconnectDB, isConnected, User, Subscription, Scammer, MuseJob, MuseThread };

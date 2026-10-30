@@ -38,7 +38,7 @@ function createService(options = {}) {
     let sendingNews = false;
     let lastNewsDate;
     const muse = museConfig ? createMuseBridge({
-        config: museConfig, store: options.museStore || createMongoStore(db.MuseJob),
+        config: museConfig, store: options.museStore || createMongoStore(db.MuseJob, db.MuseThread),
         telegram: bot.telegram, logger
     }) : null;
     if (muse) bot.context.museBridge = muse;
