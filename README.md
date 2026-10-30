@@ -64,6 +64,7 @@ Muse lấy việc qua MCP, hỗ trợ hỏi đáp kiến thức, giải thích, 
 công khai, viết/biên tập/dịch nội dung và tìm sản phẩm. Câu trả lời chung có nguồn
 tham khảo khi sử dụng web; kết quả sản phẩm vẫn có giá và link Marketplace.
 Batam trả đúng chat/Topic đã hỏi, reply tin gốc. Sảnh Chung không nhận yêu cầu.
+Khi nhận yêu cầu hợp lệ, bot im lặng chờ xử lý rồi gửi kết quả, không gửi tin xác nhận.
 `/batam` là cách gọi phụ; `/batam_status` xem lượt gần nhất trong chat/Topic hiện tại,
 `/batam_cancel` hủy lượt đang chờ tại đó; `/batam_new` bắt đầu luồng mới cho chính
 người gửi tại chat/Topic đó. Các lệnh `/muse*` cũ vẫn là alias.

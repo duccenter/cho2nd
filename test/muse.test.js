@@ -166,7 +166,7 @@ test('group results reply to the original message in the original topic without 
     const f = fixture();
     const ctx = f.ctx('/batam iPhone cũ', 99, 'supergroup');
     await f.bridge.commands.search(ctx);
-    assert.equal(ctx.replies[0][1].message_thread_id, 9);
+    assert.equal(ctx.replies.length, 0);
     const { job } = await f.bridge.claim();
     assert.ok(!JSON.stringify(job).includes('chat_id'));
     assert.ok(!JSON.stringify(job).includes('thread_id'));

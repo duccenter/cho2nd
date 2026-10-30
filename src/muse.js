@@ -217,10 +217,10 @@ function createMuseBridge({ config, store, telegram, logger = console, now = () 
                     if (error.code === 11000) return 'Bạn còn một yêu cầu đang chờ. Dùng /batam_status hoặc /batam_cancel tại nơi đã gửi yêu cầu.';
                     throw error;
                 }
-                return 'Batam đã nhận yêu cầu và sẽ trả kết quả tại đây khi xử lý xong. Khi đông người, thời gian chờ có thể lâu hơn. Dùng /batam_status để xem, /batam_cancel để hủy.';
             });
             admission = queued.catch(() => {});
-            return reply(ctx, await queued);
+            const notice = await queued;
+            if (notice) return reply(ctx, notice);
         },
         async newThread(ctx) {
             if (!allowed(ctx)) return reply(ctx, 'Hãy dùng Batam trong chat riêng hoặc Topic của nhóm Chợ 2nd.');
