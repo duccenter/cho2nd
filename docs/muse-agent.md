@@ -42,7 +42,7 @@ Auth: Bearer qua header Authorization. Chỉ cho phép đúng hai công cụ:
 
 1. `claim_search_job({})`: lấy tối đa một công việc, lease15 phút. Trả `job:null`
    khi trống. Dữ liệu gồm `job_id`, `lease_token`, `query`, `lease_until`,
-   `history` (tối đa8 `{user,assistant,at}`, tổng12000 ký tự nội dung),
+   `history` (tối đa50 `{user,assistant,at}`, tổng100000 ký tự nội dung),
    `max_results=3`, `source=public_web_or_knowledge`, `result_formats` và hướng dẫn
    giới hạn tác vụ. Tên hai công cụ và connector cũ giữ nguyên để không đổi credential.
 2. `complete_search_job({job_id, lease_token, result})`: lưu kết quả đúng lease.
@@ -113,14 +113,15 @@ có thể gửi tiếp khi hoàn tất hoặc hủy lượt trước. Cùng tin 
 tạo một công việc trong thời gian lưu24 giờ, kể cả Telegram gửi lại sau khi
 đã hoàn tất. Unique index request_key không ảnh hưởng dữ liệu cũ thiếu khóa.
 Nhu cầu tối đa2000 ký tự, xuống dòng/tab được gộp thành dấu cách. Hội thoại được lưu
-riêng theo người + chat + Topic trong MuseThread trên MongoDB. Giữ tối đa8 lượt
-hoàn tất, hết hạn sau30 ngày từ lần tương tác cuối; mỗi job chụp tối đa12000 ký tự
-ngữ cảnh mới nhất theo thứ tự thời gian. Không đọc ngầm lịch sử chat hoặc tin được
+riêng theo người + chat + Topic trong MuseThread trên MongoDB. Giữ tối đa50 lượt
+hoàn tất (một câu hỏi + một câu trả lời), hết hạn sau30 ngày từ lần tương tác cuối;
+mỗi job chụp tối đa100000 ký tự ngữ cảnh mới nhất theo thứ tự thời gian, ưu tiên
+các lượt mới nếu tổng nội dung quá dài. Không đọc ngầm lịch sử chat hoặc tin được
 reply. Ngữ cảnh không mất khi bot restart hoặc job bị xóa sau24 giờ. Chỉ các lượt
 sau khi tính năng được bật được ghi nhớ, không nhập lịch sử cũ.
 `/batam_new` (alias `/muse_new`) tạo thế hệ hội thoại mới cho chính người gửi tại
 chat/Topic hiện tại. Yêu cầu đang chạy vẫn trả vào tin gốc nhưng không được ghi
-vào thế hệ mới. Thứ tự lượt lưu tăng dần để retry của kết quả đã bị loại khỏi8 lượt
+vào thế hệ mới. Thứ tự lượt lưu tăng dần để retry của kết quả đã bị loại khỏi50 lượt
 không chèn lại dữ liệu cũ. Kiểm tra expiry ngay khi đọc, không chờ Mongo TTL dọn.
 Nếu không đọc được ngữ cảnh, bot báo lỗi và chưa tạo job mới. Job hết hạn sau
 1 giờ; dữ liệu tự xóa bằng Mongo TTL sau24 giờ (Mongo có thể dọn trễ).

@@ -6,8 +6,8 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 
 const THREAD_RETENTION_MS = 30 * 86400000;
-const MAX_HISTORY_TURNS = 8;
-const MAX_HISTORY_CHARS = 12000;
+const MAX_HISTORY_TURNS = 50;
+const MAX_HISTORY_CHARS = 100000;
 const conversationKey = (owner, route) => createHash('sha256')
     .update(JSON.stringify([owner, route.chat_id, route.thread_id ?? null])).digest('hex');
 function contextHistory(turns = []) {
@@ -126,7 +126,7 @@ function createMongoStore(Job, Thread) {
             expires_at: new Date(+now + THREAD_RETENTION_MS)
         } }, { upsert: true, new: true }).lean(),
         // A monotonic sequence also deduplicates completions evicted from the
-        // eight-turn window; their retries must never replace newer context.
+        // retained window; their retries must never replace newer context.
         remember: (job, now) => Thread.updateOne({ _id: job.conversation_key,
             session_id: job.conversation_id, expires_at: { $gt: now },
             remembered_sequence: { $lt: job.conversation_sequence }

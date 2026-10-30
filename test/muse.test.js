@@ -62,7 +62,7 @@ function fixture() {
             if (!thread || thread.session_id !== job.conversation_id || +thread.expires_at <= +now ||
                 thread.remembered_sequence >= job.conversation_sequence) return;
             thread.turns.push({ job_id: job._id, user: job.query, assistant: formatResult(job.result), at: now });
-            thread.turns = thread.turns.slice(-8);
+            thread.turns = thread.turns.slice(-50);
             thread.remembered_sequence = job.conversation_sequence;
             thread.expires_at = new Date(+now + 30 * 86400000);
         },
@@ -506,17 +506,21 @@ test('30-day expiry is enforced even before Mongo TTL has deleted the document',
 test('history is bounded and replaying an evicted completion never re-adds it', async () => {
     const f = fixture();
     const first = await exchange(f, f.ctx('Lượt 0'));
-    for (let i = 1; i <= 10; i++) await exchange(f, f.ctx(`Lượt ${i}`), `Trả lời ${i}`);
+    for (let i = 1; i <= 55; i++) await exchange(f, f.ctx(`Lượt ${i}`), `Trả lời ${i}`);
     const thread = [...f.threads.values()][0];
-    assert.equal(thread.turns.length, 8);
+    assert.equal(thread.turns.length, 50);
+    const retained = await exchange(f, f.ctx('Nhắc lại các lượt trước.'));
+    assert.equal(retained.history.length, 50);
+    assert.equal(retained.history[0].user, 'Lượt 6');
+    assert.equal(retained.history.at(-1).user, 'Lượt 55');
     const before = structuredClone(thread.turns);
     await f.bridge.complete({ job_id: first.job_id, lease_token: first.lease_token, result });
     assert.deepEqual(thread.turns, before);
-    for (let i = 0; i < 8; i++) await exchange(f, f.ctx('u'.repeat(2000)), 'a'.repeat(2500));
+    for (let i = 0; i < 50; i++) await exchange(f, f.ctx('u'.repeat(2000)), 'a'.repeat(2500));
     const bounded = await exchange(f, f.ctx('Tiếp theo'));
-    assert.ok(bounded.history.length > 0 && bounded.history.length <= 8);
-    assert.ok(bounded.history.reduce((n, t) => n + t.user.length + t.assistant.length, 0) <= 12000);
-    assert.equal(thread.turns.length, 8);
+    assert.ok(bounded.history.length >= 20 && bounded.history.length < 50);
+    assert.ok(bounded.history.reduce((n, t) => n + t.user.length + t.assistant.length, 0) <= 100000);
+    assert.equal(thread.turns.length, 50);
 });
 
 test('database context failures fail closed; completion memory retry is idempotent', async () => {
@@ -562,5 +566,5 @@ test('Mongo memory update rejects earlier sequences even after history eviction 
     assert.deepEqual(captured.filter, { _id: 'scope', session_id: 'generation', expires_at: { $gt: now },
         remembered_sequence: { $lt: 12 } });
     assert.equal(captured.update.$set.remembered_sequence, 12);
-    assert.equal(captured.update.$push.turns.$slice, -8);
+    assert.equal(captured.update.$push.turns.$slice, -50);
 });

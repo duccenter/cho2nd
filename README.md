@@ -72,9 +72,10 @@ Không áp hạn mức số lượt theo giờ; mỗi người có một lượt
 trùng. Gửi yêu cầu tiếp theo sau khi lượt trước hoàn tất hoặc hủy lượt trước.
 Nhu cầu tối đa 2000 ký tự, có thể xuống dòng và gửi link HTTPS công khai không kèm
 thông tin đăng nhập. Cùng người trong cùng chat/Topic tiếp tục ngữ cảnh khi quay lại
-sau vài ngày: MongoDB lưu tối đa8 lượt Batam hoàn tất, hết hạn sau30 ngày không hoạt
-động, độc lập với hàng đợi24 giờ và việc bot restart. Muse nhận tối đa12000 ký tự
-ngữ cảnh gần nhất, kèm ngày giờ; không nhận lịch sử Telegram thông thường, tin được
+sau vài ngày: MongoDB lưu tối đa50 lượt Batam hoàn tất, hết hạn sau30 ngày không hoạt
+động, độc lập với hàng đợi24 giờ và việc bot restart. Một lượt gồm câu hỏi và câu
+trả lời. Muse nhận tối đa100000 ký tự ngữ cảnh gần nhất, kèm ngày giờ; nếu vượt
+dung lượng thì ưu tiên các lượt mới nhất. Không nhận lịch sử Telegram thông thường, tin được
 reply hay hội thoại của người khác. Bắt đầu ghi nhớ từ khi tính năng được bật.
 Câu trả lời chung tối đa2500 ký tự, kèm tối đa3 nguồn thực sự đã đọc.
 Lịch Muse được cấu hình mỗi phút, xử lý tiếp tối đa 3 yêu cầu trong một lượt
