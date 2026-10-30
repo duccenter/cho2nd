@@ -55,21 +55,28 @@ cấu hình bộ lập lịch bên ngoài gọi `GET /cron/news` với header
 API chặn gửi chồng và gửi lại trong cùng ngày khi tiến trình còn chạy;
 trạng thái này không được lưu qua lần khởi động lại.
 
-## Tìm sản phẩm với Batam và Muse
+## Trợ lý Batam với Muse
 
 Trong Topic của nhóm `GROUP_CHAT_ID`, gõ `@batam_2nd_bot tìm iPhone 13 cũ tại TP.HCM dưới 6 triệu`.
-Chat riêng với bot có thể gõ thẳng sản phẩm, khu vực, ngân sách; mọi người đều dùng được.
-Muse lấy việc qua MCP, tìm Marketplace và trả liên kết; Batam trả đúng chat/Topic
-đã hỏi, gắn với tin nhắn gốc. Sảnh Chung không nhận yêu cầu tìm kiếm.
+Hoặc gõ `@batam_2nd_bot giải thích lạm phát bằng ví dụ dễ hiểu`.
+Chat riêng với bot có thể gõ thẳng câu hỏi; mọi người đều dùng được.
+Muse lấy việc qua MCP, hỗ trợ hỏi đáp kiến thức, giải thích, tư vấn, tìm thông tin
+công khai, viết/biên tập/dịch nội dung và tìm sản phẩm. Câu trả lời chung có nguồn
+tham khảo khi sử dụng web; kết quả sản phẩm vẫn có giá và link Marketplace.
+Batam trả đúng chat/Topic đã hỏi, reply tin gốc. Sảnh Chung không nhận yêu cầu.
 `/batam` là cách gọi phụ; `/batam_status` xem lượt gần nhất trong chat/Topic hiện tại,
 `/batam_cancel` hủy lượt đang chờ tại đó. Các lệnh `/muse*` cũ vẫn là alias.
 Không áp hạn mức số lượt theo giờ; mỗi người có một lượt đang chờ để tránh gửi
 trùng. Gửi yêu cầu tiếp theo sau khi lượt trước hoàn tất hoặc hủy lượt trước.
-Nhu cầu tối đa 600 ký tự, có thể xuống dòng; không gửi link.
+Nhu cầu tối đa 2000 ký tự, có thể xuống dòng và gửi link HTTPS công khai không kèm
+thông tin đăng nhập. Mỗi câu hỏi độc lập; không tự chuyển lịch sử hoặc tin được reply
+cho Muse. Câu trả lời chung tối đa2500 ký tự, kèm tối đa3 nguồn thực sự đã đọc.
 Lịch Muse được cấu hình mỗi phút, xử lý tiếp tối đa 3 yêu cầu trong một lượt
 300 giây khi còn đủ thời gian. Lịch có thể trễ; số token không bảo đảm phản hồi tức thì.
 Yêu cầu hết thời gian chờ sẽ được báo lại đúng nơi hỏi; Telegram giao chậm được thử lại có chờ.
 Chat nhóm thông thường và nội dung đang điền form đăng bán không gửi cho Muse.
+Muse chỉ trả lời và đọc nguồn công khai; không dùng dữ liệu riêng của tài khoản chủ,
+đăng nhập, chạy mã của người hỏi, nhắn người khác, đăng bài, mua hàng hay đổi cấu hình.
 Mặc định tắt (`MUSE_ENABLED=false`); phải kết nối custom MCP và thử lịch Muse
 trước khi công bố dùng được. Các lệnh nhóm và webhook hiện tại vẫn hoạt động.
 Xem [thiết lập và giới hạn](docs/muse-agent.md). Không lưu cookie/token vào GitHub.

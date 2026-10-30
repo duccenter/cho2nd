@@ -47,7 +47,7 @@ const MuseJobSchema = new mongoose.Schema({
     thread_id: Number,
     reply_to_message_id: Number,
     request_key: String,
-    query: { type: String, required: true, maxlength: 600 },
+    query: { type: String, required: true, maxlength: 2000 },
     active: { type: Boolean, required: true },
     state: { type: String, enum: ['pending', 'leased', 'completed', 'cancelled', 'expired'], required: true },
     attempts: { type: Number, default: 0 },

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const express = require('express');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
-const { readConfig, createMongoStore, createMuseBridge, mountMuseMcp, resultSchema } = require('../src/muse');
+const { readConfig, createMongoStore, createMuseBridge, mountMuseMcp, resultSchema, formatResult } = require('../src/muse');
 
 test('real Mongoose queue model defers collection and indexes until after connection', async () => {
     const mongoose = require('mongoose');
@@ -116,7 +116,7 @@ test('private users and configured group topics can search; other groups, Genera
     const bot = f.ctx(); bot.from.is_bot = true;
     const anonymous = f.ctx(undefined, 42, 'supergroup'); anonymous.message.sender_chat = { id: -100123 };
     for (const rejected of [otherGroup, general, bot, anonymous]) await f.bridge.commands.search(rejected);
-    await f.bridge.commands.search(f.ctx('/muse https://example.com'));
+    await f.bridge.commands.search(f.ctx('/muse https://localhost/admin'));
     assert.equal(f.jobs.size, 0);
     await f.bridge.commands.search(f.ctx());
     await f.bridge.commands.search(f.ctx());
@@ -216,15 +216,76 @@ test('Telegram redelivery is idempotent even after the original result was compl
     assert.match(ctx.replies.at(-1)[0], /nhận tin nhắn này trước đó/);
 });
 
-test('multiline detailed requests fit within 600 characters and invalid lengths are rejected', async () => {
+test('multiline detailed requests fit within 2000 characters and invalid lengths are rejected', async () => {
     const f = fixture();
     const query = 'tìm iPhone 13\nTP.HCM\tdưới 6 triệu ' + 'cấu hình '.repeat(20);
     await f.bridge.commands.search(f.ctx(query));
     const job = [...f.jobs.values()][0];
     assert.ok(job.query.length > 180);
     assert.doesNotMatch(job.query, /[\n\t]/);
-    await f.bridge.commands.search(f.ctx('a'.repeat(601), 99));
+    await f.bridge.commands.search(f.ctx('a'.repeat(2001), 99));
     assert.equal(f.jobs.size, 1);
+});
+
+test('general questions, writing and public HTTPS references reach the worker without account context', async () => {
+    const f = fixture();
+    const question = 'Giải thích cơ chế event loop của Node.js theo https://nodejs.org/en/learn/ với ví dụ dễ hiểu. ' + 'Chi tiết '.repeat(90);
+    await f.bridge.commands.search(f.ctx(question));
+    const { job } = await f.bridge.claim();
+    assert.equal(job.query, question.trim());
+    assert.ok(job.query.length > 600);
+    assert.equal(job.source, 'public_web_or_knowledge');
+    assert.ok(job.result_formats.includes('answer_sources'));
+    assert.match(job.instruction, /writing, translation/);
+    assert.ok(!JSON.stringify(job).includes('chat_id'));
+    assert.ok(!JSON.stringify(job).includes('owner'));
+});
+
+test('general answers with sources deliver in the original topic, remain scoped and support status', async () => {
+    const f = fixture();
+    const ctx = f.ctx('Giải thích event loop', 42, 'supergroup');
+    await f.bridge.commands.search(ctx);
+    const { job } = await f.bridge.claim();
+    const answer = { answer: 'Event loop giúp Node.js xử lý tác vụ bất đồng bộ.', sources: [{ title: 'Node.js', url: 'https://nodejs.org/en/learn/' }] };
+    await f.bridge.complete({ job_id: job.job_id, lease_token: job.lease_token, result: answer });
+    await f.bridge.drain();
+    assert.equal(f.sends[0][0], '-100123');
+    assert.equal(f.sends[0][2].message_thread_id, 9);
+    assert.equal(f.sends[0][2].reply_parameters.message_id, ctx.message.message_id);
+    assert.match(f.sends[0][1], /Batam trả lời/);
+    assert.match(f.sends[0][1], /nodejs.org/);
+    assert.doesNotMatch(f.sends[0][1], /Marketplace|Giá:/);
+    const status = f.ctx('/batam_status', 42, 'supergroup');
+    await f.bridge.commands.status(status);
+    assert.match(status.replies[0][0], /Event loop/);
+    const privateStatus = f.ctx('/batam_status');
+    await f.bridge.commands.status(privateStatus);
+    assert.doesNotMatch(privateStatus.replies[0][0], /Event loop/);
+});
+
+test('general result schema rejects oversized answers, recipient fields and unsafe sources; maximum result fits Telegram', () => {
+    const answer = { answer: 'Thông tin chung', sources: [] };
+    assert.deepEqual(resultSchema.parse(answer), answer);
+    for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'http://nodejs.org', 'https://user:pass@nodejs.org/',
+        'https://127.0.0.1/', 'https://2130706433/', 'https://[::1]/', 'https://localhost/', 'https://localhost./',
+        'https://app.internal/', 'https://router.lan/', 'https://nodejs.org:8443/']) {
+        assert.throws(() => resultSchema.parse({ ...answer, sources: [{ title: 'Nguồn', url }] }), url);
+    }
+    assert.throws(() => resultSchema.parse({ ...answer, chat_id: '999' }));
+    assert.throws(() => resultSchema.parse({ ...answer, answer: 'a'.repeat(2501) }));
+    assert.throws(() => resultSchema.parse({ ...answer, products: [] }));
+    const max = resultSchema.parse({ answer: 'a'.repeat(2500), sources: Array.from({ length: 3 }, () => ({
+        title: 't'.repeat(100), url: 'https://nodejs.org/' + 'p'.repeat(300 - 'https://nodejs.org/'.length)
+    })) });
+    assert.ok(formatResult(max).length < 4096);
+});
+
+test('private or credential-bearing request URLs are rejected before queuing', async () => {
+    const f = fixture();
+    for (const url of ['http://nodejs.org/', 'https://user:pass@nodejs.org/', 'https://127.0.0.1/', 'https://service.internal/']) {
+        await f.bridge.commands.search(f.ctx('Đọc ' + url));
+    }
+    assert.equal(f.jobs.size, 0);
 });
 
 test('multiple workers claim different jobs and expired requests notify their original chat', async () => {
@@ -333,4 +394,13 @@ test('real MCP HTTP client negotiates and calls only authenticated, schema-valid
     assert.equal(JSON.parse(complete.content[0].text).accepted, true);
     await f.bridge.drain();
     assert.equal(f.sends.length, 1);
+    await f.bridge.commands.search(f.ctx('Dịch câu xin chào sang tiếng Anh', 99));
+    const general = JSON.parse((await client.callTool({ name: 'claim_search_job', arguments: {} })).content[0].text);
+    const answer = await client.callTool({ name: 'complete_search_job', arguments: {
+        job_id: general.job.job_id, lease_token: general.job.lease_token, result: { answer: 'Hello.', sources: [] }
+    } });
+    assert.equal(JSON.parse(answer.content[0].text).accepted, true);
+    await f.bridge.drain();
+    assert.equal(f.sends[1][0], '99');
+    assert.match(f.sends[1][1], /Hello/);
 });
