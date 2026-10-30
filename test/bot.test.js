@@ -42,10 +42,14 @@ test('a Telegram mention invokes Batam only for this bot, without forwarding rep
     const other = ctx('@other_bot tìm máy ảnh');
     other.message.entities = [{ type: 'mention', offset: 0, length: 10 }];
     await handler(other);
+    const question = ctx('@batam_2nd_bot Giải thích lạm phát bằng ví dụ dễ hiểu');
+    question.message.entities = [{ type: 'mention', offset: 0, length: 14 }];
+    await handler(question);
+    assert.equal(searches[1], 'Giải thích lạm phát bằng ví dụ dễ hiểu');
     const ordinary = ctx('Tôi cần máy ảnh');
     ordinary.message.reply_to_message = { from: { is_bot: true } };
     await handler(ordinary);
-    assert.equal(searches.length, 1);
+    assert.equal(searches.length, 2);
 });
 
 test('private text starts a search but active draft answers and slash commands keep their original route', async () => {

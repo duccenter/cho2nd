@@ -14,7 +14,7 @@ const BAD_WORDS = ['đm', 'vcl', 'địt', 'lồn', 'cặc', 'phò', 'đĩ', 'ch
 for (const [name, handler] of [['batam', 'search'], ['batam_status', 'status'], ['batam_cancel', 'cancel'],
     ['muse', 'search'], ['muse_status', 'status'], ['muse_cancel', 'cancel']]) {
     bot.command(name, async ctx => {
-        if (!ctx.museBridge) return ctx.reply('Tìm kiếm Batam chưa được bật.');
+        if (!ctx.museBridge) return ctx.reply('Trợ lý Batam chưa được bật.');
         return ctx.museBridge.commands[handler](ctx);
     });
 }
@@ -55,7 +55,7 @@ bot.command(['start', 'help', 'menu'], async (ctx) => {
     }
 
     await ctx.reply(
-        'Chào mừng đến với hệ thống Quản lý Chợ 2nd! Bạn cần giúp gì?\n\n🔎 Gõ sản phẩm, khu vực và ngân sách để Batam tìm trên Facebook Marketplace. Trong nhóm, gọi @batam_2nd_bot kèm nhu cầu.',
+        'Chào mừng đến với hệ thống Quản lý Chợ 2nd! Bạn cần giúp gì?\n\n💬 Batam hỗ trợ hỏi đáp, giải thích kiến thức, tìm thông tin, tư vấn, viết và dịch nội dung, tìm sản phẩm. Chat riêng có thể gõ thẳng câu hỏi; trong nhóm, gọi @batam_2nd_bot kèm nhu cầu.',
         Markup.inlineKeyboard([
             [Markup.button.callback('👕 Hướng dẫn Đăng bài', 'huong_dan')],
             [Markup.button.callback('🔔 Săn đồ', 'san_do'), Markup.button.callback('📋 Quản lý đồ săn', 'quanly_btn')],
